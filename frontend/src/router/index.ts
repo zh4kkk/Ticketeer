@@ -1,19 +1,8 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 
 const router = createRouter({
-  history: createWebHashHistory(import.meta.env.BASE_URL),
-  routes: [
-    {
-      path: '/auth',
-      name: 'auth',
-      component: () => import('@/pages/AuthPage.vue'),
-    },
-
-    {
-      path: '/',
-      redirect: '/auth',
-    },
-  ],
+  history: createWebHistory(import.meta.env.BASE_URL),
+  routes: [],
 })
 
 export default router
