@@ -56,7 +56,7 @@ Ticketeer/
 
 - .NET SDK 10;
 - Node.js `^22.18.0` или `>=24.12.0` (согласно `frontend/package.json`);
-- npm, поставляемый с установленной версией Node.js;
+- pnpm 11.27.0;
 - PostgreSQL либо Docker с поддержкой Docker Compose.
 
 ## Локальный запуск
@@ -69,7 +69,15 @@ Ticketeer/
 docker compose up -d db
 ```
 
-По умолчанию база данных доступна на `localhost:5432`. Параметры локального подключения указаны в `backend/appsettings.json` и `compose.yaml`.
+По умолчанию база данных доступна на `localhost:5432`. Compose задаёт локальные параметры подключения для базы `ticketeer`; они предназначены только для локального контейнера и не записываются в настройки приложения.
+
+Строку подключения передавайте приложению через стандартную переменную конфигурации ASP.NET Core:
+
+```sh
+export ConnectionStrings__Default='Host=localhost;Port=5432;Database=ticketeer;Username=<local-user>;Password=<local-password>'
+```
+
+Замените placeholders значениями локального Compose из `compose.yaml`. Безопасный шаблон строки подключения также находится в `backend/appsettings.Development.example.json`. Не добавляйте реальные пароли в отслеживаемые файлы.
 
 ### Backend
 
@@ -80,14 +88,14 @@ dotnet restore backend/backend.csproj
 dotnet run --project backend/backend.csproj
 ```
 
-Профили разработки настроены на `http://localhost:5046` и `https://localhost:7277`. В текущем состоянии точка входа backend не содержит запуска приложения, поэтому работающий REST API пока отсутствует.
+Профили разработки настроены на `http://localhost:5046` и `https://localhost:7277`. Сейчас `backend/Program.cs` не содержит точки входа приложения, поэтому работающий REST API отсутствует.
 
 ### Frontend
 
 ```sh
 cd frontend
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Команда запускает Vite-сервер разработки. Адрес будет выведен в терминале.
@@ -95,9 +103,9 @@ npm run dev
 Дополнительные проверки frontend:
 
 ```sh
-npm run type-check
-npm run lint
-npm run build
+pnpm type-check
+pnpm lint
+pnpm build
 ```
 
-Перед запуском необходимо установить зависимости. В рамках первоначальной подготовки репозитория зависимости не устанавливались.
+Команда `pnpm build` включает проверку типов через отдельный скрипт `type-check` и сборку Vite.

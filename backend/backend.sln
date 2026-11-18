@@ -4,7 +4,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "backend", "backend.csproj",
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{AAE22C9C-E649-4A42-8752-CBAD8F611220}"
 	ProjectSection(SolutionItems) = preProject
-		compose.yaml = compose.yaml
+		..\compose.yaml = ..\compose.yaml
 	EndProjectSection
 EndProject
 Global
