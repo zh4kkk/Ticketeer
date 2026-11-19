@@ -106,7 +106,10 @@ public sealed class QuestionService(AppDbContext db)
 
     public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken)
     {
-        var question = await db.Questions.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var question = await db.Questions
+            .FromSqlInterpolated($"SELECT id, topic_id, text, created_at FROM questions WHERE id = {id} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
         if (question is null)
         {
             return false;
@@ -122,6 +125,7 @@ public sealed class QuestionService(AppDbContext db)
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
         {
@@ -180,6 +184,11 @@ public sealed class QuestionService(AppDbContext db)
         if (options is null || options.Count < 2)
         {
             throw new ValidationException("A question must contain at least two answer options.");
+        }
+
+        if (options.Any(option => option is null))
+        {
+            throw new ValidationException("Answer options cannot contain null items.");
         }
 
         if (options.Count(x => x.IsCorrect) != 1)
