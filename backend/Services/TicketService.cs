@@ -72,10 +72,8 @@ public sealed class TicketService(AppDbContext db)
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var ticket = await db.Tickets
-            .Include(x => x.TicketQuestions)
-                .ThenInclude(x => x.Question)
-                    .ThenInclude(x => x.Topic)
-            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .FromSqlInterpolated($"SELECT id, title, description, created_at FROM tickets WHERE id = {id} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
         if (ticket is null)
         {
             return null;
@@ -83,6 +81,11 @@ public sealed class TicketService(AppDbContext db)
 
         try
         {
+            await db.TicketQuestions
+                .Where(x => x.TicketId == id)
+                .Include(x => x.Question)
+                    .ThenInclude(x => x.Topic)
+                .LoadAsync(cancellationToken);
             var questions = await GetQuestionsAsync(request.QuestionIds, cancellationToken);
             var existingQuestions = ticket.TicketQuestions.ToArray();
             db.TicketQuestions.RemoveRange(existingQuestions);
@@ -109,7 +112,9 @@ public sealed class TicketService(AppDbContext db)
     public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var ticket = await db.Tickets.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        var ticket = await db.Tickets
+            .FromSqlInterpolated($"SELECT id, title, description, created_at FROM tickets WHERE id = {id} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
         if (ticket is null)
         {
             return false;
