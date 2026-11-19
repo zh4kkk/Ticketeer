@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Ticketeer.Domain;
+using Ticketeer.Models;
 
 namespace Ticketeer.Data.Configurations;
 

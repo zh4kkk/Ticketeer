@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using Ticketeer.Domain;
+using Ticketeer.Models;
 
 namespace Ticketeer.Data;
 

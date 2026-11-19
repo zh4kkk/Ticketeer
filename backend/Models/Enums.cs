@@ -1,4 +1,4 @@
-namespace Ticketeer.Domain;
+namespace Ticketeer.Models;
 
 public enum UserRole
 {
