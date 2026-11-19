@@ -13,6 +13,7 @@ public sealed class CreateUserRequest
     public string FullName { get; set; } = string.Empty;
 
     [Required]
+    [MinLength(8)]
     public string Password { get; set; } = string.Empty;
 
     public int? GroupId { get; set; }
@@ -29,12 +30,15 @@ public sealed class UpdateUserRequest
     public string FullName { get; set; } = string.Empty;
 
     public int? GroupId { get; set; }
-    public bool IsActive { get; set; }
+
+    [Required]
+    public bool? IsActive { get; set; }
 }
 
 public sealed class ResetPasswordRequest
 {
     [Required]
+    [MinLength(8)]
     public string Password { get; set; } = string.Empty;
 }
 

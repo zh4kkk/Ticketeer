@@ -1,4 +1,5 @@
 using BCrypt.Net;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Ticketeer.Data;
@@ -11,13 +12,17 @@ public sealed class UserService(AppDbContext db)
 {
     public async Task<IReadOnlyList<UserResponse>> GetAllAsync(CancellationToken cancellationToken)
     {
-        var users = await db.Users.AsNoTracking().Include(x => x.Group).OrderBy(x => x.Id).ToListAsync(cancellationToken);
+        var users = await db.Users.AsNoTracking().Include(x => x.Group)
+            .Where(x => x.Role == UserRole.Cashier)
+            .OrderBy(x => x.Id)
+            .ToListAsync(cancellationToken);
         return users.Select(ToResponse).ToArray();
     }
 
     public async Task<UserResponse?> GetAsync(int id, CancellationToken cancellationToken)
     {
-        var user = await db.Users.AsNoTracking().Include(x => x.Group).SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        var user = await db.Users.AsNoTracking().Include(x => x.Group)
+            .SingleOrDefaultAsync(x => x.Id == id && x.Role == UserRole.Cashier, cancellationToken);
         return user is null ? null : ToResponse(user);
     }
 
@@ -53,13 +58,24 @@ public sealed class UserService(AppDbContext db)
             return null;
         }
 
+        if (user.Role == UserRole.Admin)
+        {
+            if (request.IsActive == false && user.IsActive && await db.Users.CountAsync(x => x.Role == UserRole.Admin && x.IsActive, cancellationToken) <= 1)
+            {
+                throw new ConflictException("The last active administrator cannot be deactivated.");
+            }
+
+            throw new ForbiddenException("Administrator accounts cannot be modified through this endpoint.");
+        }
+
+        if (request.IsActive is null)
+        {
+            throw new ValidationException("IsActive is required.");
+        }
+
         var login = NormalizeLogin(request.Login);
         ValidateLogin(login);
         ValidateFullName(request.FullName);
-        if (user.Role == UserRole.Admin && request.GroupId is not null)
-        {
-            throw new ValidationException("An administrator cannot belong to a group.");
-        }
 
         var group = await GetGroupAsync(request.GroupId, cancellationToken);
         user.Login = request.Login.Trim();
@@ -67,7 +83,7 @@ public sealed class UserService(AppDbContext db)
         user.FullName = request.FullName.Trim();
         user.GroupId = group?.Id;
         user.Group = group;
-        user.IsActive = request.IsActive;
+        user.IsActive = request.IsActive.Value;
         await SaveWithConflictHandlingAsync(cancellationToken);
         return ToResponse(user);
     }
@@ -78,6 +94,11 @@ public sealed class UserService(AppDbContext db)
         if (user is null)
         {
             return false;
+        }
+
+        if (user.Role == UserRole.Admin)
+        {
+            throw new ForbiddenException("Administrator passwords cannot be reset through this endpoint.");
         }
 
         ValidatePassword(request.Password);
@@ -111,27 +132,47 @@ public sealed class UserService(AppDbContext db)
         ValidatePassword(password);
     }
 
-    private static void ValidateLogin(string login)
+    public static void ValidateLogin(string login)
     {
         if (string.IsNullOrWhiteSpace(login))
         {
             throw new ValidationException("Login is required.");
         }
-    }
 
-    private static void ValidatePassword(string password)
-    {
-        if (string.IsNullOrWhiteSpace(password))
+        if (login.Trim().Length > 100)
         {
-            throw new ValidationException("Password is required.");
+            throw new ValidationException("Login cannot exceed 100 characters.");
         }
     }
 
-    private static void ValidateFullName(string fullName)
+    public static void ValidatePassword(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            throw new ValidationException("Password is required and must contain at least 8 characters.");
+        }
+
+        if (password.Length < 8)
+        {
+            throw new ValidationException("Password must contain at least 8 characters.");
+        }
+
+        if (Encoding.UTF8.GetByteCount(password) > 72)
+        {
+            throw new ValidationException("Password cannot exceed 72 UTF-8 bytes because of BCrypt limits.");
+        }
+    }
+
+    public static void ValidateFullName(string fullName)
     {
         if (string.IsNullOrWhiteSpace(fullName))
         {
             throw new ValidationException("Full name is required.");
+        }
+
+        if (fullName.Trim().Length > 200)
+        {
+            throw new ValidationException("Full name cannot exceed 200 characters.");
         }
     }
 

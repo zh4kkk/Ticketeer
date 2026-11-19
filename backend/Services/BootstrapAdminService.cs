@@ -12,9 +12,14 @@ public sealed class BootstrapAdminService(AppDbContext db, IConfiguration config
         var login = configuration["BootstrapAdmin:Login"];
         var password = configuration["BootstrapAdmin:Password"];
         var fullName = configuration["BootstrapAdmin:FullName"];
-        if (string.IsNullOrWhiteSpace(login) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(fullName))
+        if (login is null && password is null && fullName is null)
         {
             return;
+        }
+
+        if (login is null || password is null || fullName is null)
+        {
+            throw new ValidationException("Bootstrap administrator configuration requires Login, Password and FullName.");
         }
 
         if (await db.Users.AnyAsync(x => x.Role == UserRole.Admin, cancellationToken))
@@ -23,10 +28,9 @@ public sealed class BootstrapAdminService(AppDbContext db, IConfiguration config
         }
 
         var normalizedLogin = UserService.NormalizeLogin(login);
-        if (string.IsNullOrWhiteSpace(normalizedLogin))
-        {
-            throw new InvalidOperationException("Bootstrap admin login cannot be empty.");
-        }
+        UserService.ValidateLogin(login);
+        UserService.ValidatePassword(password);
+        UserService.ValidateFullName(fullName);
 
         var admin = new User
         {

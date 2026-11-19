@@ -33,6 +33,10 @@ public sealed class UsersController(UserService userService) : ControllerBase
         {
             return Conflict(new { error = exception.Message });
         }
+        catch (ForbiddenException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = exception.Message });
+        }
         catch (NotFoundException exception)
         {
             return NotFound(new { error = exception.Message });
@@ -55,6 +59,10 @@ public sealed class UsersController(UserService userService) : ControllerBase
         {
             return Conflict(new { error = exception.Message });
         }
+        catch (ForbiddenException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = exception.Message });
+        }
         catch (NotFoundException exception)
         {
             return NotFound(new { error = exception.Message });
@@ -75,6 +83,10 @@ public sealed class UsersController(UserService userService) : ControllerBase
         catch (ValidationException exception)
         {
             return BadRequest(new { error = exception.Message });
+        }
+        catch (ForbiddenException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = exception.Message });
         }
     }
 }
