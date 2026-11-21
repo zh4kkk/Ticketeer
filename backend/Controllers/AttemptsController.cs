@@ -25,6 +25,18 @@ public sealed class AttemptsController(AttemptService attemptService) : Controll
         await StartAttempt(
             userId => attemptService.StartExamAsync(examId, userId, cancellationToken));
 
+    [HttpPost("training/random")]
+    public async Task<ActionResult<AttemptResponse>> StartRandomTraining(
+        StartRandomTrainingRequest request,
+        CancellationToken cancellationToken) =>
+        await StartAttempt(userId => attemptService.StartRandomTrainingAsync(
+            request.TopicId, request.QuestionCount, userId, cancellationToken));
+
+    [HttpPost("exams/random")]
+    public async Task<ActionResult<AttemptResponse>> StartRandomExam(
+        CancellationToken cancellationToken) =>
+        await StartAttempt(userId => attemptService.StartRandomExamAsync(userId, cancellationToken));
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<AttemptResponse>> Get(int id, CancellationToken cancellationToken)
     {

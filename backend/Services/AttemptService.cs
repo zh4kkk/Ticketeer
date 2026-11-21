@@ -16,23 +16,87 @@ public sealed class AttemptService(AppDbContext db)
         int ticketId,
         int userId,
         CancellationToken cancellationToken) =>
-        StartPreparedAsync(
+        StartAttemptAsync(
             userId,
             ticketId,
             AttemptKind.Training,
+            AttemptSource.Prepared,
+            (preparedSetId, token) => GetTicketQuestionsAsync(preparedSetId, token),
             cancellationToken);
 
     public Task<AttemptResponse> StartExamAsync(
         int examId,
         int userId,
         CancellationToken cancellationToken) =>
-        StartPreparedAsync(
+        StartAttemptAsync(
             userId,
             examId,
             AttemptKind.Exam,
+            AttemptSource.Prepared,
+            (preparedSetId, token) => GetExamQuestionsAsync(preparedSetId, token),
+            cancellationToken);
+
+    public Task<AttemptResponse> StartRandomTrainingAsync(
+        int topicId,
+        int questionCount,
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        if (topicId <= 0)
+        {
+            throw new ValidationException("TopicId must be positive.");
+        }
+
+        if (questionCount <= 0)
+        {
+            throw new ValidationException("QuestionCount must be positive.");
+        }
+
+        return StartAttemptAsync(
+            userId,
+            topicId,
+            AttemptKind.Training,
+            AttemptSource.Random,
+            (topicIdValue, token) => GetRandomTrainingQuestionsAsync(topicIdValue, questionCount, token),
+            cancellationToken);
+    }
+
+    public Task<AttemptResponse> StartRandomExamAsync(
+        int userId,
+        CancellationToken cancellationToken) =>
+        StartAttemptAsync(
+            userId,
+            0,
+            AttemptKind.Exam,
+            AttemptSource.Random,
+            (_, token) => GetRandomExamQuestionsAsync(token),
             cancellationToken);
 
     public async Task<AttemptResponse?> GetAsync(
+        int id,
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await GetCoreAsync(id, userId, cancellationToken);
+        }
+        catch (PostgresException exception) when (IsAttemptConcurrencyConflict(exception))
+        {
+            throw new ConflictException("The attempt was changed concurrently. Try again.");
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException("The attempt was changed concurrently. Try again.");
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException postgresException &&
+                                                  IsAttemptConcurrencyConflict(postgresException))
+        {
+            throw new ConflictException("The attempt was changed concurrently. Try again.");
+        }
+    }
+
+    private async Task<AttemptResponse?> GetCoreAsync(
         int id,
         int userId,
         CancellationToken cancellationToken)
@@ -56,6 +120,32 @@ public sealed class AttemptService(AppDbContext db)
     }
 
     public async Task<AttemptResponse> SubmitAnswerAsync(
+        int id,
+        int questionId,
+        int userId,
+        SubmitAttemptAnswerRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await SubmitAnswerCoreAsync(id, questionId, userId, request, cancellationToken);
+        }
+        catch (PostgresException exception) when (IsAttemptConcurrencyConflict(exception))
+        {
+            throw new ConflictException("The attempt was changed concurrently. Try again.");
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException("The attempt was changed concurrently. Try again.");
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException postgresException &&
+                                                  IsAttemptConcurrencyConflict(postgresException))
+        {
+            throw new ConflictException("The attempt was changed concurrently. Try again.");
+        }
+    }
+
+    private async Task<AttemptResponse> SubmitAnswerCoreAsync(
         int id,
         int questionId,
         int userId,
@@ -162,10 +252,12 @@ public sealed class AttemptService(AppDbContext db)
         attempt.FinishedAt = attempt.StartedAt.AddSeconds(attempt.TimeLimitSeconds!.Value);
     }
 
-    private async Task<AttemptResponse> StartPreparedAsync(
+    private async Task<AttemptResponse> StartAttemptAsync(
         int userId,
-        int preparedSetId,
+        int sourceId,
         AttemptKind kind,
+        AttemptSource source,
+        Func<int, CancellationToken, Task<List<PreparedQuestion>>> getQuestions,
         CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(
@@ -184,9 +276,7 @@ public sealed class AttemptService(AppDbContext db)
                 throw new ForbiddenException("Only an active cashier can start an attempt.");
             }
 
-            var preparedQuestions = kind == AttemptKind.Training
-                ? await GetTicketQuestionsAsync(preparedSetId, cancellationToken)
-                : await GetExamQuestionsAsync(preparedSetId, cancellationToken);
+            var preparedQuestions = await getQuestions(sourceId, cancellationToken);
 
             ValidatePreparedQuestions(kind, preparedQuestions);
 
@@ -194,9 +284,9 @@ public sealed class AttemptService(AppDbContext db)
             {
                 UserId = user.Id,
                 Kind = kind,
-                Source = AttemptSource.Prepared,
-                TicketId = kind == AttemptKind.Training ? preparedSetId : null,
-                ExamId = kind == AttemptKind.Exam ? preparedSetId : null,
+                Source = source,
+                TicketId = source == AttemptSource.Prepared && kind == AttemptKind.Training ? sourceId : null,
+                ExamId = source == AttemptSource.Prepared && kind == AttemptKind.Exam ? sourceId : null,
                 GroupIdSnapshot = user.GroupId,
                 GroupNameSnapshot = user.Group?.Name,
                 StartedAt = DateTimeOffset.UtcNow,
@@ -238,13 +328,100 @@ public sealed class AttemptService(AppDbContext db)
         }
         catch (PostgresException exception) when (IsConcurrencyConflict(exception))
         {
-            throw new ConflictException("The prepared question set was changed concurrently. Try again.");
+            throw new ConflictException("The question bank was changed concurrently. Try again.");
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException("The question bank was changed concurrently. Try again.");
         }
         catch (DbUpdateException exception) when (exception.InnerException is PostgresException postgresException &&
                                                   IsConcurrencyConflict(postgresException))
         {
-            throw new ConflictException("The prepared question set was changed concurrently. Try again.");
+            throw new ConflictException("The question bank was changed concurrently. Try again.");
         }
+    }
+
+    private async Task<List<PreparedQuestion>> GetRandomTrainingQuestionsAsync(
+        int topicId,
+        int questionCount,
+        CancellationToken cancellationToken)
+    {
+        var topicExists = await db.Topics
+            .FromSqlInterpolated($"SELECT * FROM topics WHERE id = {topicId} FOR SHARE")
+            .AsNoTracking()
+            .AnyAsync(cancellationToken);
+        if (!topicExists)
+        {
+            throw new NotFoundException("Topic was not found.");
+        }
+
+        var availableCount = await db.Questions
+            .CountAsync(x => x.TopicId == topicId, cancellationToken);
+        if (questionCount > availableCount)
+        {
+            throw new ValidationException("The topic does not contain enough questions.");
+        }
+
+        var questions = await db.Questions.AsNoTracking()
+            .Where(x => x.TopicId == topicId)
+            .OrderBy(_ => EF.Functions.Random())
+            .Take(questionCount)
+            .Select(x => new PreparedQuestion(
+                x.Id,
+                0,
+                x.Text,
+                x.AnswerOptions
+                    .OrderBy(option => option.Position)
+                    .Select(option => new PreparedOption(
+                        option.Position,
+                        option.Text,
+                        option.IsCorrect))
+                    .ToList()))
+            .ToListAsync(cancellationToken);
+
+        return EnsureRandomSelection(questions, questionCount);
+    }
+
+    private async Task<List<PreparedQuestion>> GetRandomExamQuestionsAsync(
+        CancellationToken cancellationToken)
+    {
+        var availableCount = await db.Questions.CountAsync(cancellationToken);
+        if (availableCount < ExamQuestionCount)
+        {
+            throw new ValidationException($"The question bank must contain at least {ExamQuestionCount} questions.");
+        }
+
+        var questions = await db.Questions.AsNoTracking()
+            .OrderBy(_ => EF.Functions.Random())
+            .Take(ExamQuestionCount)
+            .Select(x => new PreparedQuestion(
+                x.Id,
+                0,
+                x.Text,
+                x.AnswerOptions
+                    .OrderBy(option => option.Position)
+                    .Select(option => new PreparedOption(
+                        option.Position,
+                        option.Text,
+                        option.IsCorrect))
+                    .ToList()))
+            .ToListAsync(cancellationToken);
+
+        return EnsureRandomSelection(questions, ExamQuestionCount);
+    }
+
+    private static List<PreparedQuestion> EnsureRandomSelection(
+        List<PreparedQuestion> questions,
+        int expectedCount)
+    {
+        if (questions.Count != expectedCount)
+        {
+            throw new ConflictException("The question bank was changed concurrently. Try again.");
+        }
+
+        return questions
+            .Select((question, index) => question with { Position = index + 1 })
+            .ToList();
     }
 
     private async Task<List<PreparedQuestion>> GetTicketQuestionsAsync(
@@ -344,6 +521,10 @@ public sealed class AttemptService(AppDbContext db)
         exception.SqlState is PostgresErrorCodes.SerializationFailure
             or PostgresErrorCodes.DeadlockDetected
             or PostgresErrorCodes.ForeignKeyViolation;
+
+    private static bool IsAttemptConcurrencyConflict(PostgresException exception) =>
+        exception.SqlState is PostgresErrorCodes.SerializationFailure
+            or PostgresErrorCodes.DeadlockDetected;
 
     private static AttemptResponse ToResponse(Attempt attempt) =>
         new(

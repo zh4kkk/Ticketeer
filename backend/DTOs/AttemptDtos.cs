@@ -3,6 +3,8 @@ using Ticketeer.Models;
 
 namespace Ticketeer.DTOs;
 
+public sealed record StartRandomTrainingRequest(int TopicId, int QuestionCount);
+
 public sealed record SubmitAttemptAnswerRequest(int SelectedOptionPosition);
 
 public sealed record AttemptOptionResponse(
