@@ -9,8 +9,9 @@ namespace Ticketeer.Services;
 
 public sealed class AttemptService(AppDbContext db)
 {
-    private const int ExamQuestionCount = 10;
-    private const int ExamTimeLimitSeconds = 20 * 60;
+    public const int ExamQuestionCount = 10;
+    public const int ExamTimeLimitSeconds = 20 * 60;
+    public const int ExamMaxWrongAnswers = 2;
 
     public async Task<int> ExpireExamTimeoutsAsync(
         int? userId,
@@ -53,6 +54,34 @@ public sealed class AttemptService(AppDbContext db)
               AND time_limit_seconds IS NOT NULL
               AND started_at + make_interval(secs => time_limit_seconds) <= CURRENT_TIMESTAMP
             """, cancellationToken);
+        }
+        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected)
+        {
+            throw new ConflictException("Attempts were changed concurrently. Try again.");
+        }
+    }
+
+    public async Task<int> ExpireExamTimeoutsForUsersAsync(
+        IReadOnlyCollection<int> userIds,
+        CancellationToken cancellationToken)
+    {
+        if (userIds.Count == 0)
+        {
+            return 0;
+        }
+
+        try
+        {
+            var ids = userIds.Distinct().ToArray();
+            return await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE attempts
+                SET status = 'TimedOut', is_passed = FALSE,
+                    finished_at = started_at + make_interval(secs => time_limit_seconds)
+                WHERE kind = 'Exam' AND status = 'InProgress'
+                  AND time_limit_seconds IS NOT NULL
+                  AND started_at + make_interval(secs => time_limit_seconds) <= CURRENT_TIMESTAMP
+                  AND user_id = ANY({ids})
+                """, cancellationToken);
         }
         catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected)
         {
@@ -256,7 +285,7 @@ public sealed class AttemptService(AppDbContext db)
         }
 
         var answeredCount = attempt.AttemptQuestions.Count(x => x.AnsweredAt is not null);
-        if (attempt.Kind == AttemptKind.Exam && attempt.WrongAnswers >= 3)
+        if (attempt.Kind == AttemptKind.Exam && attempt.WrongAnswers > ExamMaxWrongAnswers)
         {
             attempt.Status = AttemptStatus.Failed;
             attempt.IsPassed = false;

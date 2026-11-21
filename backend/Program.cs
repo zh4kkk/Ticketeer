@@ -38,6 +38,7 @@ builder.Services.AddScoped<TicketService>();
 builder.Services.AddScoped<ExamService>();
 builder.Services.AddScoped<AttemptService>();
 builder.Services.AddScoped<StatisticsService>();
+builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<BootstrapAdminService>();
 builder.Services.AddControllers();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

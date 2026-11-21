@@ -8,9 +8,17 @@ namespace Ticketeer.Services;
 
 public sealed class ExamService(AppDbContext db)
 {
-    public async Task<IReadOnlyList<ExamListResponse>> GetAllAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ExamListResponse>> GetAllAsync(CancellationToken cancellationToken, string? search = null)
     {
-        return await db.Exams.AsNoTracking()
+        var query = db.Exams.AsNoTracking();
+        var pattern = CatalogSearch.Pattern(search);
+        if (pattern is not null)
+        {
+            query = query.Where(x => EF.Functions.ILike(x.Title, pattern, "\\") ||
+                                     (x.Description != null && EF.Functions.ILike(x.Description, pattern, "\\")));
+        }
+
+        return await query
             .OrderBy(x => x.Id)
             .Select(x => new ExamListResponse(
                 x.Id,

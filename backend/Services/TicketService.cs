@@ -8,9 +8,21 @@ namespace Ticketeer.Services;
 
 public sealed class TicketService(AppDbContext db)
 {
-    public async Task<IReadOnlyList<TicketListResponse>> GetAllAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TicketListResponse>> GetAllAsync(CancellationToken cancellationToken, string? search = null, int? topicId = null)
     {
-        return await db.Tickets.AsNoTracking()
+        var query = db.Tickets.AsNoTracking().AsQueryable();
+        var pattern = CatalogSearch.Pattern(search);
+        if (pattern is not null)
+        {
+            query = query.Where(x => EF.Functions.ILike(x.Title, pattern, "\\") ||
+                                     (x.Description != null && EF.Functions.ILike(x.Description, pattern, "\\")));
+        }
+        if (topicId is not null)
+        {
+            query = query.Where(x => x.TicketQuestions.Any(question => question.Question.TopicId == topicId.Value));
+        }
+
+        return await query
             .OrderBy(x => x.Id)
             .Select(x => new TicketListResponse(
                 x.Id,

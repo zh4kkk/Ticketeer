@@ -11,8 +11,11 @@ namespace Ticketeer.Controllers;
 public sealed class TopicsController(TopicService topicService) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<TopicResponse>>> GetAll(CancellationToken cancellationToken) =>
-        Ok(await topicService.GetAllAsync(cancellationToken));
+    public async Task<ActionResult<IReadOnlyList<TopicResponse>>> GetAll(string? search, CancellationToken cancellationToken)
+    {
+        try { return Ok(await topicService.GetAllAsync(cancellationToken, search)); }
+        catch (ValidationException exception) { return BadRequest(new { error = exception.Message }); }
+    }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<TopicResponse>> Get(int id, CancellationToken cancellationToken)

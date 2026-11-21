@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Ticketeer.Data;
 using Ticketeer.DTOs;
@@ -46,7 +47,10 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
         CancellationToken cancellationToken)
     {
         await attemptService.ExpireExamTimeoutsAsync(userId, null, cancellationToken);
-        return await BuildStatisticsAsync(userId, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+        var result = await BuildStatisticsAsync(userId, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<IReadOnlyList<ActivityResponse>> GetActivityAsync(
@@ -70,8 +74,6 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
         {
             throw new ValidationException("GroupId must be positive.");
         }
-        await attemptService.ExpireExamTimeoutsAsync(null, null, cancellationToken);
-
         var usersQuery = db.Users.AsNoTracking()
             .Where(x => x.Role == UserRole.Cashier);
         if (groupId is not null)
@@ -88,6 +90,12 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
             .ToListAsync(cancellationToken);
 
         var userIds = users.Select(x => x.Id).ToArray();
+        if (userIds.Length == 0)
+        {
+            return new PagedResponse<UserStatisticsResponse>(Array.Empty<UserStatisticsResponse>(), page, pageSize, totalCount);
+        }
+        await attemptService.ExpireExamTimeoutsForUsersAsync(userIds, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
         var aggregates = await GetAggregatesAsync(
             db.Attempts.AsNoTracking().Where(x => userIds.Contains(x.UserId)),
             cancellationToken);
@@ -110,6 +118,7 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
             user.IsActive,
             ToStatistics(aggregates.GetValueOrDefault(user.Id), totalPreparedTickets,
                 completedTicketsByUser.GetValueOrDefault(user.Id)))).ToArray();
+        await transaction.CommitAsync(cancellationToken);
         return new PagedResponse<UserStatisticsResponse>(items, page, pageSize, totalCount);
     }
 
@@ -125,6 +134,7 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
         }
 
         await attemptService.ExpireExamTimeoutsAsync(userId, null, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
         var totalPreparedTickets = await db.Tickets.CountAsync(cancellationToken);
         var completedPreparedTickets = await db.Attempts.AsNoTracking()
             .Where(x => x.UserId == userId && x.Kind == AttemptKind.Training &&
@@ -134,6 +144,7 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
             .Distinct()
             .CountAsync(cancellationToken);
         var statistics = await BuildStatisticsAsync(userId, cancellationToken, totalPreparedTickets, completedPreparedTickets);
+        await transaction.CommitAsync(cancellationToken);
         return new UserStatisticsResponse(user.Id, user.Login, user.FullName, user.GroupId, user.Group?.Name, user.IsActive, statistics);
     }
 
@@ -174,6 +185,7 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
     public async Task<IReadOnlyList<GroupStatisticsResponse>> GetGroupStatisticsAsync(CancellationToken cancellationToken)
     {
         await attemptService.ExpireExamTimeoutsAsync(null, null, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
         var groups = await db.Groups.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
         var aggregates = await GetGroupAggregatesAsync(cancellationToken);
         var members = await db.Users.AsNoTracking()
@@ -181,17 +193,20 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
             .GroupBy(x => x.GroupId!.Value)
             .Select(group => new { GroupId = group.Key, Total = group.Count(), Active = group.Count(x => x.IsActive) })
             .ToDictionaryAsync(x => x.GroupId, x => (x.Total, x.Active), cancellationToken);
-        return groups.Select(group =>
+        var result = groups.Select(group =>
         {
             var aggregate = aggregates.GetValueOrDefault(group.Id);
             var counts = members.GetValueOrDefault(group.Id);
             return ToGroupStatistics(aggregate, group.Id, group.Name, counts.Total, counts.Active);
         }).ToArray();
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<GroupStatisticsResponse?> GetGroupStatisticsAsync(int groupId, CancellationToken cancellationToken)
     {
         await attemptService.ExpireExamTimeoutsAsync(null, groupId, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
         var group = await db.Groups.AsNoTracking().SingleOrDefaultAsync(x => x.Id == groupId, cancellationToken);
         if (group is null)
         {
@@ -203,8 +218,10 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
             .GroupBy(_ => 1)
             .Select(x => new { Total = x.Count(), Active = x.Count(user => user.IsActive) })
             .SingleOrDefaultAsync(cancellationToken);
-        var aggregate = (await GetGroupAggregatesAsync(cancellationToken)).GetValueOrDefault(groupId);
-        return ToGroupStatistics(aggregate, group.Id, group.Name, counts?.Total ?? 0, counts?.Active ?? 0);
+        var aggregate = (await GetGroupAggregatesAsync(cancellationToken, groupId)).GetValueOrDefault(groupId);
+        var result = ToGroupStatistics(aggregate, group.Id, group.Name, counts?.Total ?? 0, counts?.Active ?? 0);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private async Task<StatisticsResponse> BuildStatisticsAsync(
@@ -267,9 +284,18 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
                 group.Sum(x => x.Status != AttemptStatus.InProgress ? x.WrongAnswers : 0)))
             .ToDictionaryAsync(x => x.UserId, cancellationToken);
 
-    private async Task<Dictionary<int, AggregateRow>> GetGroupAggregatesAsync(CancellationToken cancellationToken) =>
-        await db.Attempts.AsNoTracking()
-            .Where(x => x.GroupIdSnapshot != null)
+    private async Task<Dictionary<int, AggregateRow>> GetGroupAggregatesAsync(
+        CancellationToken cancellationToken,
+        int? groupId = null)
+    {
+        var query = db.Attempts.AsNoTracking()
+            .Where(x => x.GroupIdSnapshot != null);
+        if (groupId is not null)
+        {
+            query = query.Where(x => x.GroupIdSnapshot == groupId.Value);
+        }
+
+        return await query
             .GroupBy(x => x.GroupIdSnapshot!.Value)
             .Select(group => new AggregateRow(
                 group.Key,
@@ -281,6 +307,7 @@ public sealed class StatisticsService(AppDbContext db, AttemptService attemptSer
                 group.Sum(x => x.Status != AttemptStatus.InProgress ? x.CorrectAnswers : 0),
                 group.Sum(x => x.Status != AttemptStatus.InProgress ? x.WrongAnswers : 0)))
             .ToDictionaryAsync(x => x.UserId, cancellationToken);
+    }
 
     private static StatisticsResponse ToStatistics(AggregateRow? aggregate, int totalTickets, int completedTickets)
     {
