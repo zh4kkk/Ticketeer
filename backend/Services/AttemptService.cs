@@ -12,6 +12,54 @@ public sealed class AttemptService(AppDbContext db)
     private const int ExamQuestionCount = 10;
     private const int ExamTimeLimitSeconds = 20 * 60;
 
+    public async Task<int> ExpireExamTimeoutsAsync(
+        int? userId,
+        int? groupId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (userId is not null)
+            {
+                return await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE attempts
+                SET status = 'TimedOut', is_passed = FALSE,
+                    finished_at = started_at + make_interval(secs => time_limit_seconds)
+                WHERE kind = 'Exam' AND status = 'InProgress'
+                  AND time_limit_seconds IS NOT NULL
+                  AND started_at + make_interval(secs => time_limit_seconds) <= CURRENT_TIMESTAMP
+                  AND user_id = {userId.Value}
+                """, cancellationToken);
+            }
+
+            if (groupId is not null)
+            {
+                return await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE attempts
+                SET status = 'TimedOut', is_passed = FALSE,
+                    finished_at = started_at + make_interval(secs => time_limit_seconds)
+                WHERE kind = 'Exam' AND status = 'InProgress'
+                  AND time_limit_seconds IS NOT NULL
+                  AND started_at + make_interval(secs => time_limit_seconds) <= CURRENT_TIMESTAMP
+                  AND group_id_snapshot = {groupId.Value}
+                """, cancellationToken);
+            }
+
+            return await db.Database.ExecuteSqlRawAsync("""
+            UPDATE attempts
+            SET status = 'TimedOut', is_passed = FALSE,
+                finished_at = started_at + make_interval(secs => time_limit_seconds)
+            WHERE kind = 'Exam' AND status = 'InProgress'
+              AND time_limit_seconds IS NOT NULL
+              AND started_at + make_interval(secs => time_limit_seconds) <= CURRENT_TIMESTAMP
+            """, cancellationToken);
+        }
+        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected)
+        {
+            throw new ConflictException("Attempts were changed concurrently. Try again.");
+        }
+    }
+
     public Task<AttemptResponse> StartTrainingTicketAsync(
         int ticketId,
         int userId,
@@ -95,6 +143,12 @@ public sealed class AttemptService(AppDbContext db)
             throw new ConflictException("The attempt was changed concurrently. Try again.");
         }
     }
+
+    public Task<AttemptResponse?> GetForUserAsync(
+        int id,
+        int userId,
+        CancellationToken cancellationToken) =>
+        GetAsync(id, userId, cancellationToken);
 
     private async Task<AttemptResponse?> GetCoreAsync(
         int id,

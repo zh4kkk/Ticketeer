@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Ticketeer.DTOs;
+using Ticketeer.Models;
 using Ticketeer.Services;
 
 namespace Ticketeer.Controllers;
@@ -9,7 +10,7 @@ namespace Ticketeer.Controllers;
 [ApiController]
 [Route("api/attempts")]
 [Authorize(Roles = "Cashier")]
-public sealed class AttemptsController(AttemptService attemptService) : ControllerBase
+public sealed class AttemptsController(AttemptService attemptService, StatisticsService statisticsService) : ControllerBase
 {
     [HttpPost("training/tickets/{ticketId:int}")]
     public async Task<ActionResult<AttemptResponse>> StartTrainingTicket(
@@ -49,6 +50,35 @@ public sealed class AttemptsController(AttemptService attemptService) : Controll
         {
             var response = await attemptService.GetAsync(id, userId, cancellationToken);
             return response is null ? NotFound() : Ok(response);
+        }
+        catch (ConflictException exception)
+        {
+            return Conflict(new { error = exception.Message });
+        }
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<PagedResponse<AttemptHistoryItem>>> GetHistory(
+        int page = 1,
+        int pageSize = 20,
+        AttemptKind? kind = null,
+        AttemptSource? source = null,
+        AttemptStatus? status = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Ok(await statisticsService.GetAttemptHistoryAsync(
+                userId, page, pageSize, kind, source, status, cancellationToken));
+        }
+        catch (ValidationException exception)
+        {
+            return BadRequest(new { error = exception.Message });
         }
         catch (ConflictException exception)
         {
