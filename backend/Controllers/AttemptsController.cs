@@ -33,8 +33,46 @@ public sealed class AttemptsController(AttemptService attemptService) : Controll
             return Unauthorized();
         }
 
-        var response = await attemptService.GetAsync(id, userId, cancellationToken);
-        return response is null ? NotFound() : Ok(response);
+        try
+        {
+            var response = await attemptService.GetAsync(id, userId, cancellationToken);
+            return response is null ? NotFound() : Ok(response);
+        }
+        catch (ConflictException exception)
+        {
+            return Conflict(new { error = exception.Message });
+        }
+    }
+
+    [HttpPost("{id:int}/questions/{questionId:int}/answer")]
+    public async Task<ActionResult<AttemptResponse>> SubmitAnswer(
+        int id,
+        int questionId,
+        SubmitAttemptAnswerRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Ok(await attemptService.SubmitAnswerAsync(
+                id, questionId, userId, request, cancellationToken));
+        }
+        catch (ConflictException exception)
+        {
+            return Conflict(new { error = exception.Message });
+        }
+        catch (NotFoundException exception)
+        {
+            return NotFound(new { error = exception.Message });
+        }
+        catch (ValidationException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
     }
 
     private async Task<ActionResult<AttemptResponse>> StartAttempt(

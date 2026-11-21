@@ -37,11 +37,129 @@ public sealed class AttemptService(AppDbContext db)
         int userId,
         CancellationToken cancellationToken)
     {
-        var attempt = await db.Attempts.AsNoTracking()
-            .Include(x => x.AttemptQuestions)
-            .SingleOrDefaultAsync(x => x.Id == id && x.UserId == userId, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var attempt = await GetForUpdateAsync(id, userId, cancellationToken);
+        if (attempt is null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return null;
+        }
 
-        return attempt is null ? null : ToResponse(attempt);
+        if (IsExpired(attempt, DateTimeOffset.UtcNow))
+        {
+            MarkTimedOut(attempt);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return ToResponse(attempt);
+    }
+
+    public async Task<AttemptResponse> SubmitAnswerAsync(
+        int id,
+        int questionId,
+        int userId,
+        SubmitAttemptAnswerRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.SelectedOptionPosition <= 0)
+        {
+            throw new ValidationException("Selected option position must be positive.");
+        }
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var attempt = await GetForUpdateAsync(id, userId, cancellationToken)
+            ?? throw new NotFoundException("Attempt was not found.");
+
+        var now = DateTimeOffset.UtcNow;
+        if (IsExpired(attempt, now))
+        {
+            MarkTimedOut(attempt);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            throw new ConflictException("The attempt time limit has expired.");
+        }
+
+        if (attempt.Status != AttemptStatus.InProgress)
+        {
+            throw new ConflictException("The attempt is already finished.");
+        }
+
+        var question = attempt.AttemptQuestions.SingleOrDefault(x => x.Id == questionId)
+            ?? throw new NotFoundException("The question does not belong to this attempt.");
+        if (question.AnsweredAt is not null)
+        {
+            throw new ConflictException("The question has already been answered.");
+        }
+
+        var option = question.OptionsSnapshot.SingleOrDefault(
+            x => x.Position == request.SelectedOptionPosition);
+        if (option is null)
+        {
+            throw new ValidationException("Selected option does not exist.");
+        }
+
+        question.SelectedOptionPosition = option.Position;
+        question.IsCorrect = option.IsCorrect;
+        question.AnsweredAt = now;
+        if (option.IsCorrect)
+        {
+            attempt.CorrectAnswers++;
+        }
+        else
+        {
+            attempt.WrongAnswers++;
+        }
+
+        var answeredCount = attempt.AttemptQuestions.Count(x => x.AnsweredAt is not null);
+        if (attempt.Kind == AttemptKind.Exam && attempt.WrongAnswers >= 3)
+        {
+            attempt.Status = AttemptStatus.Failed;
+            attempt.IsPassed = false;
+            attempt.FinishedAt = now;
+        }
+        else if (answeredCount >= attempt.QuestionCount)
+        {
+            attempt.Status = AttemptStatus.Completed;
+            attempt.FinishedAt = now;
+            attempt.IsPassed = attempt.Kind == AttemptKind.Exam ? true : null;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return ToResponse(attempt);
+    }
+
+    private async Task<Attempt?> GetForUpdateAsync(
+        int id,
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        var attempt = await db.Attempts
+            .FromSqlInterpolated($"SELECT * FROM attempts WHERE id = {id} AND user_id = {userId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        if (attempt is null)
+        {
+            return null;
+        }
+
+        await db.AttemptQuestions
+            .Where(x => x.AttemptId == attempt.Id)
+            .LoadAsync(cancellationToken);
+        return attempt;
+    }
+
+    private static bool IsExpired(Attempt attempt, DateTimeOffset now) =>
+        attempt.Kind == AttemptKind.Exam &&
+        attempt.Status == AttemptStatus.InProgress &&
+        attempt.TimeLimitSeconds is int limit &&
+        now >= attempt.StartedAt.AddSeconds(limit);
+
+    private static void MarkTimedOut(Attempt attempt)
+    {
+        attempt.Status = AttemptStatus.TimedOut;
+        attempt.IsPassed = false;
+        attempt.FinishedAt = attempt.StartedAt.AddSeconds(attempt.TimeLimitSeconds!.Value);
     }
 
     private async Task<AttemptResponse> StartPreparedAsync(

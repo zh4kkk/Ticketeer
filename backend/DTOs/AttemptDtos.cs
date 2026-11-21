@@ -3,6 +3,8 @@ using Ticketeer.Models;
 
 namespace Ticketeer.DTOs;
 
+public sealed record SubmitAttemptAnswerRequest(int SelectedOptionPosition);
+
 public sealed record AttemptOptionResponse(
     int Position,
     string Text,
