@@ -1,4 +1,5 @@
 using BCrypt.Net;
+using System.Data;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -60,9 +61,16 @@ public sealed class UserService(AppDbContext db)
 
         if (user.Role == UserRole.Admin)
         {
-            if (request.IsActive == false && user.IsActive && await db.Users.CountAsync(x => x.Role == UserRole.Admin && x.IsActive, cancellationToken) <= 1)
+            if (request.IsActive == false && user.IsActive)
             {
-                throw new ConflictException("The last active administrator cannot be deactivated.");
+                await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+                var activeAdminCount = (await db.Users
+                    .FromSqlInterpolated($"SELECT * FROM users WHERE role = 'Admin' AND is_active = TRUE FOR UPDATE")
+                    .ToListAsync(cancellationToken)).Count;
+                if (activeAdminCount <= 1)
+                {
+                    throw new ConflictException("The last active administrator cannot be deactivated.");
+                }
             }
 
             throw new ForbiddenException("Administrator accounts cannot be modified through this endpoint.");
