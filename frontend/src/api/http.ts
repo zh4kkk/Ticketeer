@@ -98,8 +98,8 @@ function isAbortError(error: unknown): boolean {
   return isObject(error) && error.name === 'AbortError'
 }
 
-export async function request<T>(url: string, options?: RequestOptions): Promise<T>
 export async function request(url: string, options: RequestOptions & { responseType: 'empty' }): Promise<void>
+export async function request<T = unknown>(url: string, options?: Omit<RequestOptions, 'responseType'> & { responseType?: 'json' }): Promise<T>
 export async function request<T>(url: string, options: RequestOptions = {}): Promise<T | void> {
   const normalizedUrl = normalizeApiUrl(url)
   const { json, headers: providedHeaders, responseType = 'json', auth = true, ...init } = options
@@ -145,13 +145,26 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
   return body.value as T
 }
 
-export const api = {
-  get: <T>(url: string, options: Omit<RequestOptions, 'method' | 'json'> = {}) =>
-    request<T>(url, { ...options, method: 'GET' }),
-  post: <T>(url: string, json?: unknown, options: Omit<RequestOptions, 'method' | 'json'> = {}) =>
-    request<T>(url, { ...options, method: 'POST', json }),
-  put: <T>(url: string, json?: unknown, options: Omit<RequestOptions, 'method' | 'json'> = {}) =>
-    request<T>(url, { ...options, method: 'PUT', json }),
-  delete: (url: string, options: Omit<RequestOptions, 'method' | 'json'> = {}) =>
-    request(url, { ...options, method: 'DELETE', responseType: options.responseType ?? 'empty' }),
+type JsonOptions = Omit<RequestOptions, 'method' | 'json' | 'responseType'> & { responseType?: 'json' }
+type EmptyOptions = Omit<RequestOptions, 'method' | 'json'> & { responseType: 'empty' }
+
+function get<T = unknown>(url: string, options: JsonOptions = {}): Promise<T> {
+  return request<T>(url, { ...options, method: 'GET' })
 }
+function post<T = unknown>(url: string, json?: unknown, options?: JsonOptions): Promise<T>
+function post(url: string, json: unknown, options: EmptyOptions): Promise<void>
+function post<T>(url: string, json?: unknown, options: JsonOptions | EmptyOptions = {}): Promise<T | void> {
+  if (options.responseType === 'empty') return request(url, { ...options, method: 'POST', json })
+  return request<T>(url, { ...options, method: 'POST', json })
+}
+function put<T = unknown>(url: string, json?: unknown, options?: JsonOptions): Promise<T>
+function put(url: string, json: unknown, options: EmptyOptions): Promise<void>
+function put<T>(url: string, json?: unknown, options: JsonOptions | EmptyOptions = {}): Promise<T | void> {
+  if (options.responseType === 'empty') return request(url, { ...options, method: 'PUT', json })
+  return request<T>(url, { ...options, method: 'PUT', json })
+}
+function del(url: string, options: Omit<RequestOptions, 'method' | 'json' | 'responseType'> & { responseType?: 'empty' } = {}): Promise<void> {
+  return request(url, { ...options, method: 'DELETE', responseType: 'empty' })
+}
+
+export const api = { get, post, put, delete: del }

@@ -5,6 +5,13 @@ import { ApiError } from '@/api/http'
 import { clearSession, isSessionExpired, readSession, SessionStorageError, setSessionGeneration, writeSession } from '@/api/session'
 import type { CurrentUserResponse, LoginRequest } from '@/types/api'
 
+export class AuthProfileError extends Error {
+  constructor(details?: string) {
+    super(details ? `Не удалось подтвердить профиль после входа: ${details}` : 'Не удалось подтвердить профиль после входа.')
+    this.name = 'AuthProfileError'
+  }
+}
+
 const MAX_TIMEOUT = 2_147_000_000
 
 export const useAuthStore = defineStore('auth', () => {
@@ -135,8 +142,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(credentials: LoginRequest): Promise<CurrentUserResponse> {
     if (loginPromise) return loginPromise
-    if (initializePromise) await initializePromise
-    loginPromise = performLogin(credentials).finally(() => {
+    loginPromise = (async () => {
+      if (initializePromise) await initializePromise
+      return performLogin(credentials)
+    })().finally(() => {
       loginPromise = null
     })
     return loginPromise
@@ -155,13 +164,18 @@ export const useAuthStore = defineStore('auth', () => {
       writeSession({ token: response.token, expiresAt: response.expiresAt })
       token.value = response.token
       expiresAt.value = response.expiresAt
-      const profile = await getCurrentUser()
+      let profile: CurrentUserResponse
+      try {
+        profile = await getCurrentUser()
+      } catch (error) {
+        throw new AuthProfileError(error instanceof Error ? error.message : undefined)
+      }
       if (sessionGeneration !== generation) throw new ApiError('Сессия была изменена.', 0)
       if (isSessionExpired(response.expiresAt)) {
         endSession('expired')
-        throw new ApiError('Срок действия сессии истёк во время входа.', 401)
+        throw new AuthProfileError('Срок действия сессии истёк во время входа.')
       }
-      if (!supportedUser(profile)) throw new ApiError('Сервер вернул неподдерживаемую роль.', 401)
+      if (!supportedUser(profile)) throw new AuthProfileError('Сервер вернул неподдерживаемую роль.')
       user.value = profile
       isInitialized.value = true
       scheduleExpiry(sessionGeneration, response.expiresAt)

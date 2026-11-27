@@ -1,6 +1,17 @@
 :root {
-  color: #172033;
-  background: #f8fafc;
+  --rzd-red: #E21A1A;
+  --rzd-dark-red: #C4151C;
+  --rzd-red-soft: #FDEAEA;
+  --rzd-blue: #0066A1;
+  --rzd-blue-soft: #E7F1F6;
+  --rzd-graphite: #3F4443;
+  --rzd-black: #000000;
+  --rzd-surface: #FFFFFF;
+  --rzd-canvas: #F5F6F7;
+  --rzd-muted: #5F6664;
+  --rzd-line: #D7DBDA;
+  color: var(--rzd-graphite);
+  background: var(--rzd-canvas);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -11,20 +22,20 @@ body { margin: 0; min-width: 320px; }
 button, input { font: inherit; }
 .app-input {
   width: 100%;
-  border: 1px solid #dbe2ea;
+  border: 1px solid var(--rzd-line);
   border-radius: 0.75rem;
-  background: #fff;
+  background: var(--rzd-surface);
   padding: 0.65rem 0.8rem;
-  color: #172033;
+  color: var(--rzd-graphite);
   outline: none;
 }
-.app-input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgb(37 99 235 / 0.16); }
-.app-input:disabled { background: #f1f5f9; }
+.app-input:focus { border-color: var(--rzd-blue); box-shadow: 0 0 0 3px rgb(0 102 161 / 0.18); }
+.app-input:disabled { background: #EEF0F0; }
 .app-spinner {
   width: 1.25rem;
   height: 1.25rem;
-  border: 2px solid #bfdbfe;
-  border-top-color: #2563eb;
+  border: 2px solid #B9D7E7;
+  border-top-color: var(--rzd-red);
   border-radius: 9999px;
   animation: spin 0.7s linear infinite;
 }

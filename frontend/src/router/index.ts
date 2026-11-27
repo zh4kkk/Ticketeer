@@ -7,6 +7,13 @@ import CashierHomeView from '@/views/CashierHomeView.vue'
 import LoginView from '@/views/LoginView.vue'
 import StatusView from '@/views/StatusView.vue'
 import RootView from '@/views/RootView.vue'
+import CashierTopicsView from '@/views/cashier/CashierTopicsView.vue'
+import CashierTicketsView from '@/views/cashier/CashierTicketsView.vue'
+import CashierTicketDetailView from '@/views/cashier/CashierTicketDetailView.vue'
+import CashierExamsView from '@/views/cashier/CashierExamsView.vue'
+import CashierExamDetailView from '@/views/cashier/CashierExamDetailView.vue'
+import CashierQuestionsView from '@/views/cashier/CashierQuestionsView.vue'
+import CashierQuestionDetailView from '@/views/cashier/CashierQuestionDetailView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -22,7 +29,16 @@ const router = createRouter({
     { path: '/login', name: 'login', component: LoginView },
     {
       path: '/cashier', component: CashierLayout, meta: { requiresAuth: true, roles: ['Cashier'] } satisfies RouteMeta,
-      children: [{ path: '', name: 'cashier-home', component: CashierHomeView }],
+      children: [
+        { path: '', name: 'cashier-home', component: CashierHomeView },
+        { path: 'topics', name: 'cashier-topics', component: CashierTopicsView },
+        { path: 'tickets', name: 'cashier-tickets', component: CashierTicketsView },
+        { path: 'tickets/:id', name: 'cashier-ticket-detail', component: CashierTicketDetailView },
+        { path: 'exams', name: 'cashier-exams', component: CashierExamsView },
+        { path: 'exams/:id', name: 'cashier-exam-detail', component: CashierExamDetailView },
+        { path: 'questions', name: 'cashier-questions', component: CashierQuestionsView },
+        { path: 'questions/:id', name: 'cashier-question-detail', component: CashierQuestionDetailView },
+      ],
     },
     {
       path: '/admin', component: AdminLayout, meta: { requiresAuth: true, roles: ['Admin'] } satisfies RouteMeta,

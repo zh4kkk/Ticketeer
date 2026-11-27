@@ -3,11 +3,15 @@ import AppHeader from '@/components/AppHeader.vue'
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50 text-ink">
+  <div class="min-h-screen bg-canvas text-ink">
     <AppHeader title="Рабочее место кассира" />
     <div class="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:px-8">
-      <nav aria-label="Навигация кассира" class="flex gap-2 overflow-x-auto lg:w-52 lg:flex-col">
-        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier">Главная</RouterLink>
+      <nav aria-label="Навигация кассира" class="flex gap-2 overflow-x-auto lg:w-56 lg:flex-col">
+        <RouterLink class="nav-link" exact-active-class="nav-link-active" to="/cashier">Главная</RouterLink>
+        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/topics">Темы</RouterLink>
+        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/tickets">Тренировочные билеты</RouterLink>
+        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/exams">Экзамены</RouterLink>
+        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/questions">Вопросы</RouterLink>
       </nav>
       <main class="min-w-0 flex-1"><RouterView /></main>
     </div>
