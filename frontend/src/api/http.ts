@@ -1,4 +1,4 @@
-import { getSessionGeneration, readSession } from './session'
+import { getSessionGeneration, isSessionExpired, readSession } from './session'
 import type { ApiErrorBody } from '@/types/api'
 
 export type ResponseType = 'json' | 'empty'
@@ -111,6 +111,10 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
 
   const session = auth ? readSession() : null
   const requestGeneration = getSessionGeneration()
+  if (session?.token && isSessionExpired(session.expiresAt)) {
+    unauthorizedHandler?.({ token: session.token, generation: requestGeneration, url: normalizedUrl })
+    throw new ApiError('Срок действия сессии истёк.', 401)
+  }
   headers.delete('Authorization')
   if (session?.token) headers.set('Authorization', `Bearer ${session.token}`)
 
@@ -125,7 +129,8 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
   let body: ParsedBody
   try {
     body = await parseBody(response)
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) throw new ApiAbortError()
     throw new ApiError('Не удалось прочитать ответ сервера.', response.status, {}, 'parse')
   }
   if (!response.ok) {

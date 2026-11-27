@@ -81,24 +81,51 @@ export ConnectionStrings__Default='Host=localhost;Port=5432;Database=ticketeer;U
 
 ### Backend
 
-Из корня репозитория:
+Создайте локальную конфигурацию из безопасного шаблона. Файл `backend/.env` игнорируется Git и должен иметь ограниченные права доступа:
+
+```sh
+cp backend/.env.example backend/.env
+chmod 600 backend/.env
+```
+
+Заполните `Jwt__Key` случайным ключом длиной не менее 32 байт и задайте локальные значения bootstrap-администратора. Реальные секреты не добавляйте в Git.
+
+Запустите миграции и backend из корня репозитория:
 
 ```sh
 dotnet restore backend/backend.csproj
-dotnet run --project backend/backend.csproj
+dotnet tool restore --tool-manifest backend/dotnet-tools.json
+set -a; source backend/.env; set +a
+cd backend
+dotnet ef database update --project backend.csproj
+cd ..
+set -a; source backend/.env; set +a
+ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://localhost:5046 dotnet run --project backend/backend.csproj --no-launch-profile
 ```
 
 Профили разработки настроены на `http://localhost:5046` и `https://localhost:7277`. Backend запускается через `backend/Program.cs` и требует строки подключения и JWT-настроек. Полный перечень endpoint и ролей приведён в [docs/api.md](docs/api.md).
+
+После запуска проверьте backend:
+
+```sh
+curl http://localhost:5046/health
+```
+
+Ожидаемый ответ: `{"status":"ok","database":"ok"}`. Bootstrap-администратор создаётся только если в базе ещё нет администратора. Для остановки backend используйте `Ctrl+C`, а PostgreSQL остановите без удаления данных:
+
+```sh
+docker compose stop db
+```
 
 ### Frontend
 
 ```sh
 cd frontend
 pnpm install
-pnpm dev
+pnpm dev --host 127.0.0.1
 ```
 
-Команда запускает Vite-сервер разработки. Адрес будет выведен в терминале.
+Команда запускает Vite-сервер разработки; обычно приложение доступно по адресу `http://127.0.0.1:5173`. Запросы `/api/...` проходят через сохранённый Vite proxy к backend на `http://localhost:5046`. Для остановки frontend используйте `Ctrl+C`.
 
 Дополнительные проверки frontend:
 

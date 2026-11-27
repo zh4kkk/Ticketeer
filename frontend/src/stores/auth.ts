@@ -18,6 +18,7 @@ export const useAuthStore = defineStore('auth', () => {
   let expiryTimer: ReturnType<typeof setTimeout> | undefined
   let generation = 0
   let initializePromise: Promise<void> | null = null
+  let loginPromise: Promise<CurrentUserResponse> | null = null
   setSessionGeneration(generation)
 
   const isAuthenticated = computed(
@@ -91,6 +92,10 @@ export const useAuthStore = defineStore('auth', () => {
       try {
         const profile = await getCurrentUser()
         if (operationGeneration !== generation) return
+        if (isSessionExpired(stored.expiresAt)) {
+          endSession('expired')
+          return
+        }
         if (!supportedUser(profile)) throw new ApiError('Сервер вернул неподдерживаемую роль.', 401)
         user.value = profile
         scheduleExpiry(operationGeneration, stored.expiresAt)
@@ -121,10 +126,23 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function retrySession(): Promise<void> {
+    if (loginPromise) {
+      await loginPromise
+      return
+    }
     await initializeSession(true)
   }
 
   async function login(credentials: LoginRequest): Promise<CurrentUserResponse> {
+    if (loginPromise) return loginPromise
+    if (initializePromise) await initializePromise
+    loginPromise = performLogin(credentials).finally(() => {
+      loginPromise = null
+    })
+    return loginPromise
+  }
+
+  async function performLogin(credentials: LoginRequest): Promise<CurrentUserResponse> {
     const sessionGeneration = ++generation
     setSessionGeneration(generation)
     clearState()
@@ -139,6 +157,10 @@ export const useAuthStore = defineStore('auth', () => {
       expiresAt.value = response.expiresAt
       const profile = await getCurrentUser()
       if (sessionGeneration !== generation) throw new ApiError('Сессия была изменена.', 0)
+      if (isSessionExpired(response.expiresAt)) {
+        endSession('expired')
+        throw new ApiError('Срок действия сессии истёк во время входа.', 401)
+      }
       if (!supportedUser(profile)) throw new ApiError('Сервер вернул неподдерживаемую роль.', 401)
       user.value = profile
       isInitialized.value = true

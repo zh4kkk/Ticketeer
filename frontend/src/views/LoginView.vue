@@ -23,6 +23,7 @@ function messageFor(error: unknown): string {
     if (error.status === 0) return error.message
     return error.message
   }
+  if (error instanceof Error) return error.message
   return 'Не удалось выполнить вход. Попробуйте ещё раз.'
 }
 
