@@ -1,5 +1,4 @@
-import { api } from './http'
-import { ApiError } from './http'
+import { ApiError, api } from './http'
 import type { CurrentUserResponse, LoginRequest, LoginResponse, UserRole } from '@/types/api'
 
 function isRole(value: unknown): value is UserRole {
@@ -17,15 +16,15 @@ function isCurrentUser(value: unknown): value is CurrentUserResponse {
 }
 
 export function login(request: LoginRequest): Promise<LoginResponse> {
-  return api.post<unknown>('/api/auth/login', request).then((value) => {
-    if (!isLoginResponse(value)) throw new ApiError('Сервер вернул некорректный ответ входа.', 0)
+  return api.post<unknown>('/api/auth/login', request, { auth: false }).then((value) => {
+    if (!isLoginResponse(value)) throw new ApiError('Сервер вернул некорректный ответ входа.', 0, {}, 'parse')
     return value
   })
 }
 
 export function getCurrentUser(): Promise<CurrentUserResponse> {
-  return api.get<unknown>('/api/auth/me').then((value) => {
-    if (!isCurrentUser(value)) throw new ApiError('Сервер вернул некорректный профиль пользователя.', 0)
+  return api.get<unknown>('/api/auth/me', { auth: true }).then((value) => {
+    if (!isCurrentUser(value)) throw new ApiError('Сервер вернул некорректный профиль пользователя.', 0, {}, 'parse')
     return value
   })
 }

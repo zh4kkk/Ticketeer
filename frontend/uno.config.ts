@@ -2,6 +2,10 @@ import { defineConfig, presetWind3 } from 'unocss'
 
 export default defineConfig({
   presets: [presetWind3()],
+  shortcuts: {
+    'nav-link': 'whitespace-nowrap rounded-app px-3 py-2 text-sm font-medium text-muted hover:bg-blue-50 hover:text-brand',
+    'nav-link-active': 'bg-blue-50 text-brand',
+  },
   theme: {
     colors: {
       brand: '#2563eb',

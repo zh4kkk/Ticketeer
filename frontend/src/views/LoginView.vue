@@ -13,6 +13,7 @@ const login = ref('')
 const password = ref('')
 const isSubmitting = ref(false)
 const errorMessage = ref('')
+const isRetryingSession = ref(false)
 
 const canSubmit = computed(() => login.value.trim().length > 0 && password.value.length > 0)
 
@@ -27,8 +28,30 @@ function messageFor(error: unknown): string {
 
 function safeRedirect(): string {
   const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
-  const allowedPrefix = auth.isAdmin ? '/admin' : '/cashier'
-  return redirect.startsWith(allowedPrefix) && !redirect.startsWith('//') ? redirect : allowedPrefix
+  const home = auth.isAdmin ? '/admin' : '/cashier'
+  if (!redirect || redirect.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(redirect)) return home
+  let resolved
+  try {
+    resolved = router.resolve(redirect)
+  } catch {
+    return home
+  }
+  const roles = resolved.meta.roles
+  const isAllowed = resolved.meta.requiresAuth === true && resolved.name !== 'login' && resolved.name !== 'not-found' && Boolean(auth.user && roles?.includes(auth.user.role))
+  return isAllowed ? resolved.fullPath : home
+}
+
+async function retrySession(): Promise<void> {
+  isRetryingSession.value = true
+  errorMessage.value = ''
+  try {
+    await auth.retrySession()
+    if (auth.isAuthenticated) await router.replace(safeRedirect())
+  } catch (error) {
+    errorMessage.value = messageFor(error)
+  } finally {
+    isRetryingSession.value = false
+  }
 }
 
 async function submit(): Promise<void> {
@@ -54,7 +77,12 @@ async function submit(): Promise<void> {
         <h1 class="text-2xl font-bold text-ink">Вход в приложение</h1>
         <p class="mt-2 text-sm leading-6 text-muted">Обучение и проверка знаний железнодорожных билетных кассиров.</p>
       </div>
-      <AppAlert v-if="auth.initializationError" :message="auth.initializationError" variant="info" class="mb-4" />
+      <AppAlert v-if="route.query.reason === 'expired'" message="Срок действия сессии истёк. Войдите снова." variant="info" class="mb-4" />
+      <AppAlert v-else-if="route.query.reason === 'unauthorized'" message="Сессия больше недействительна. Войдите снова." variant="info" class="mb-4" />
+      <div v-if="auth.initializationError" class="mb-4 space-y-3">
+        <AppAlert :message="auth.initializationError" variant="info" />
+        <AppButton variant="secondary" :loading="isRetryingSession" @click="retrySession">Повторить проверку сессии</AppButton>
+      </div>
       <AppAlert v-if="errorMessage" :message="errorMessage" class="mb-4" />
       <form class="space-y-5" @submit.prevent="submit">
         <div>

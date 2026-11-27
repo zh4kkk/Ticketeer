@@ -6,7 +6,7 @@ const auth = useAuthStore()
 const ready = ref(false)
 
 onMounted(async () => {
-  await auth.restoreSession()
+  await auth.initializeSession()
   ready.value = true
 })
 </script>

@@ -35,12 +35,15 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  await auth.restoreSession()
+  await auth.initializeSession()
   if (to.name === 'root') {
     return auth.isAdmin ? { name: 'admin-home' } : auth.isCashier ? { name: 'cashier-home' } : { name: 'login' }
   }
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    return { name: 'login', query: { redirect: to.fullPath } }
+    return {
+      name: 'login',
+      query: { redirect: to.fullPath, ...(auth.sessionEndReason ? { reason: auth.sessionEndReason } : {}) },
+    }
   }
   if (to.name === 'login' && auth.isAuthenticated) {
     return auth.isAdmin ? { name: 'admin-home' } : { name: 'cashier-home' }
