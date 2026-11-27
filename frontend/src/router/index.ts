@@ -1,8 +1,53 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteMeta } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import AdminLayout from '@/layouts/AdminLayout.vue'
+import CashierLayout from '@/layouts/CashierLayout.vue'
+import AdminHomeView from '@/views/AdminHomeView.vue'
+import CashierHomeView from '@/views/CashierHomeView.vue'
+import LoginView from '@/views/LoginView.vue'
+import StatusView from '@/views/StatusView.vue'
+import RootView from '@/views/RootView.vue'
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    requiresAuth?: boolean
+    roles?: Array<'Admin' | 'Cashier'>
+  }
+}
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes: [],
+  routes: [
+    { path: '/', name: 'root', component: RootView },
+    { path: '/login', name: 'login', component: LoginView },
+    {
+      path: '/cashier', component: CashierLayout, meta: { requiresAuth: true, roles: ['Cashier'] } satisfies RouteMeta,
+      children: [{ path: '', name: 'cashier-home', component: CashierHomeView }],
+    },
+    {
+      path: '/admin', component: AdminLayout, meta: { requiresAuth: true, roles: ['Admin'] } satisfies RouteMeta,
+      children: [{ path: '', name: 'admin-home', component: AdminHomeView }],
+    },
+    { path: '/403', name: 'forbidden', component: StatusView, props: { code: 403 } },
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: StatusView, props: { code: 404 } },
+  ],
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  await auth.restoreSession()
+  if (to.name === 'root') {
+    return auth.isAdmin ? { name: 'admin-home' } : auth.isCashier ? { name: 'cashier-home' } : { name: 'login' }
+  }
+  if (to.meta.requiresAuth && !auth.isAuthenticated) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (to.name === 'login' && auth.isAuthenticated) {
+    return auth.isAdmin ? { name: 'admin-home' } : { name: 'cashier-home' }
+  }
+  const roles = to.meta.roles
+  if (roles && auth.user && !roles.includes(auth.user.role)) return { name: 'forbidden' }
+  return true
 })
 
 export default router
