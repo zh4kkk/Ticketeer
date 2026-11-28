@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCatalogTicket } from '@/api/catalog'
+import { startTrainingTicket } from '@/api/attempts'
 import { ApiAbortError, ApiError } from '@/api/http'
 import AppButton from '@/components/AppButton.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -9,16 +10,18 @@ import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import StatusLabel from '@/components/StatusLabel.vue'
 import type { CatalogTicketResponse } from '@/types/catalog'
+import { parsePositiveInt } from '@/utils/routeQuery'
 const route = useRoute()
 const router = useRouter()
 const item = ref<CatalogTicketResponse | null>(null)
 const loading = ref(false)
 const error = ref('')
+const startError = ref('')
+const starting = ref(false)
 let controller: AbortController | null = null
 let requestId = 0
 const id = () => {
-  const n = Number(route.params.id)
-  return Number.isInteger(n) && n > 0 ? n : undefined
+  return parsePositiveInt(route.params.id)
 }
 const message = (e: unknown) =>
   e instanceof ApiError && e.status === 404
@@ -55,6 +58,19 @@ onBeforeUnmount(() => {
   requestId += 1
   controller?.abort()
 })
+async function startTraining(): Promise<void> {
+  if (!item.value || starting.value) return
+  starting.value = true
+  startError.value = ''
+  try {
+    const response = await startTrainingTicket(item.value.id)
+    await router.push({ name: 'cashier-attempt', params: { id: response.id } })
+  } catch (e) {
+    startError.value = e instanceof ApiError ? e.message : 'Не удалось начать тренировку.'
+  } finally {
+    starting.value = false
+  }
+}
 </script>
 <template>
   <section class="space-y-6">
@@ -91,12 +107,17 @@ onBeforeUnmount(() => {
           >
         </div>
       </div>
-      <AppButton
-        variant="secondary"
-        class="mt-8"
-        @click="router.push({ name: 'cashier-tickets', query: route.query })"
-        >К списку билетов</AppButton
-      >
+      <div class="mt-8 flex flex-wrap gap-3">
+        <AppButton variant="primary" :disabled="starting" @click="startTraining">
+          {{ starting ? 'Запуск…' : item.isCompleted ? 'Пройти ещё раз' : 'Начать тренировку' }}
+        </AppButton>
+        <AppButton
+          variant="secondary"
+          @click="router.push({ name: 'cashier-tickets', query: route.query })"
+          >К списку билетов</AppButton
+        >
+      </div>
+      <p v-if="startError" class="mt-3 text-sm text-danger">{{ startError }}</p>
     </article>
   </section>
 </template>

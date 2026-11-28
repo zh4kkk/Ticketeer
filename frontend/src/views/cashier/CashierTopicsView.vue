@@ -121,6 +121,11 @@ onBeforeUnmount(() => {
             :to="{ name: 'cashier-tickets', query: { topicId: String(topic.id) } }"
             >Билеты темы</RouterLink
           >
+          <RouterLink
+            class="text-sm font-semibold text-secondary hover:underline"
+            :to="{ name: 'cashier-random-training', query: { topicId: String(topic.id) } }"
+            >Случайная тренировка</RouterLink
+          >
         </div>
       </article>
     </div>

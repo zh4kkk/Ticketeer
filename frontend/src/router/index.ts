@@ -14,6 +14,9 @@ import CashierExamsView from '@/views/cashier/CashierExamsView.vue'
 import CashierExamDetailView from '@/views/cashier/CashierExamDetailView.vue'
 import CashierQuestionsView from '@/views/cashier/CashierQuestionsView.vue'
 import CashierQuestionDetailView from '@/views/cashier/CashierQuestionDetailView.vue'
+import CashierRandomTrainingView from '@/views/cashier/CashierRandomTrainingView.vue'
+import CashierAttemptView from '@/views/cashier/CashierAttemptView.vue'
+import CashierAttemptResultView from '@/views/cashier/CashierAttemptResultView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -44,6 +47,17 @@ const router = createRouter({
           name: 'cashier-question-detail',
           component: CashierQuestionDetailView,
         },
+        {
+          path: 'training/random',
+          name: 'cashier-random-training',
+          component: CashierRandomTrainingView,
+        },
+        { path: 'attempts/:id', name: 'cashier-attempt', component: CashierAttemptView },
+        {
+          path: 'attempts/:id/result',
+          name: 'cashier-attempt-result',
+          component: CashierAttemptResultView,
+        },
       ],
     },
     {
@@ -60,6 +74,7 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   await auth.initializeSession()
+  auth.ensureSessionActive()
   if (to.name === 'root') {
     return auth.isAdmin
       ? { name: 'admin-home' }

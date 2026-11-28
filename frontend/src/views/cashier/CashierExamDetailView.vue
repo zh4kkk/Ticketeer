@@ -2,22 +2,25 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCatalogExam } from '@/api/catalog'
+import { startExam } from '@/api/attempts'
 import { ApiAbortError, ApiError } from '@/api/http'
 import AppButton from '@/components/AppButton.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import type { CatalogExamResponse } from '@/types/catalog'
+import { parsePositiveInt } from '@/utils/routeQuery'
 const route = useRoute()
 const router = useRouter()
 const item = ref<CatalogExamResponse | null>(null)
 const loading = ref(false)
 const error = ref('')
+const startError = ref('')
+const starting = ref(false)
 let controller: AbortController | null = null
 let requestId = 0
 const id = () => {
-  const n = Number(route.params.id)
-  return Number.isInteger(n) && n > 0 ? n : undefined
+  return parsePositiveInt(route.params.id)
 }
 const formatTime = (s: number) =>
   s < 60 ? `${s} сек.` : `${Math.floor(s / 60)} мин.${s % 60 ? ` ${s % 60} сек.` : ''}`
@@ -56,6 +59,20 @@ onBeforeUnmount(() => {
   requestId += 1
   controller?.abort()
 })
+async function beginExam(): Promise<void> {
+  if (!item.value || starting.value) return
+  if (!window.confirm('Начать экзамен? Время продолжит идти после обновления страницы.')) return
+  starting.value = true
+  startError.value = ''
+  try {
+    const response = await startExam(item.value.id)
+    await router.push({ name: 'cashier-attempt', params: { id: response.id } })
+  } catch (e) {
+    startError.value = e instanceof ApiError ? e.message : 'Не удалось начать экзамен.'
+  } finally {
+    starting.value = false
+  }
+}
 </script>
 <template>
   <section class="space-y-6">
@@ -93,12 +110,16 @@ onBeforeUnmount(() => {
       <p class="mt-7 rounded-app bg-secondary-soft p-4 text-sm text-secondary">
         Состав вопросов и правильные ответы доступны только в процессе прохождения экзамена.
       </p>
+      <AppButton variant="primary" class="mt-8" :disabled="starting" @click="beginExam">{{
+        starting ? 'Запуск…' : 'Начать экзамен'
+      }}</AppButton>
       <AppButton
         variant="secondary"
-        class="mt-8"
+        class="mt-3"
         @click="router.push({ name: 'cashier-exams', query: route.query })"
         >К списку экзаменов</AppButton
       >
+      <p v-if="startError" class="mt-3 text-sm text-danger">{{ startError }}</p>
     </article>
   </section>
 </template>

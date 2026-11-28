@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCatalogExams } from '@/api/catalog'
+import { startRandomExam } from '@/api/attempts'
 import { ApiAbortError, ApiError } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -17,6 +18,8 @@ const search = ref('')
 const result = ref<PagedResponse<CatalogExamResponse> | null>(null)
 const loading = ref(false)
 const error = ref('')
+const startingRandom = ref(false)
+const randomError = ref('')
 let controller: AbortController | null = null
 let requestId = 0
 function formatTime(seconds: number): string {
@@ -61,6 +64,19 @@ function apply() {
 function resetSearch(): void {
   search.value = ''
   apply()
+}
+async function startRandom(): Promise<void> {
+  if (startingRandom.value) return
+  startingRandom.value = true
+  randomError.value = ''
+  try {
+    const response = await startRandomExam()
+    await router.push({ name: 'cashier-attempt', params: { id: response.id } })
+  } catch (e) {
+    randomError.value = e instanceof ApiError ? e.message : 'Не удалось начать случайный экзамен.'
+  } finally {
+    startingRandom.value = false
+  }
 }
 function changePage(p: number) {
   if (result.value && p >= 1 && p <= Math.ceil(result.value.totalCount / pageSize))
@@ -108,6 +124,19 @@ onBeforeUnmount(() => {
         Сбросить
       </button>
     </form>
+    <div class="rounded-app border border-secondary bg-secondary-soft p-4">
+      <h2 class="font-semibold text-secondary">Случайный экзамен</h2>
+      <p class="mt-1 text-sm text-secondary">10 вопросов, 20 минут и не более двух ошибок.</p>
+      <button
+        class="mt-3 rounded-app bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-hover"
+        type="button"
+        :disabled="startingRandom"
+        @click="startRandom"
+      >
+        {{ startingRandom ? 'Запуск…' : 'Начать случайный экзамен' }}
+      </button>
+      <p v-if="randomError" class="mt-2 text-sm text-danger">{{ randomError }}</p>
+    </div>
     <LoadingState v-if="loading" /><ErrorState
       v-else-if="error"
       :message="error"

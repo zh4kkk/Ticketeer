@@ -91,6 +91,13 @@ export const useAuthStore = defineStore('auth', () => {
     return value.role === 'Admin' || value.role === 'Cashier'
   }
 
+  function ensureSessionActive(): boolean {
+    if (!token.value || !expiresAt.value) return false
+    if (!isSessionExpired(expiresAt.value)) return true
+    endSession('expired')
+    return false
+  }
+
   async function initializeSession(force = false): Promise<void> {
     if (isInitialized.value && !force) return
     if (initializePromise) return initializePromise
@@ -238,6 +245,7 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     initializeSession,
     retrySession,
+    ensureSessionActive,
     handleUnauthorized,
   }
 })

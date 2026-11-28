@@ -8,6 +8,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import type { CatalogQuestionResponse } from '@/types/catalog'
+import { parsePositiveInt } from '@/utils/routeQuery'
 const route = useRoute()
 const router = useRouter()
 const item = ref<CatalogQuestionResponse | null>(null)
@@ -16,8 +17,7 @@ const error = ref('')
 let controller: AbortController | null = null
 let requestId = 0
 const id = () => {
-  const n = Number(route.params.id)
-  return Number.isInteger(n) && n > 0 ? n : undefined
+  return parsePositiveInt(route.params.id)
 }
 const message = (e: unknown) =>
   e instanceof ApiError && e.status === 404

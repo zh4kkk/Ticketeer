@@ -75,6 +75,18 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </form>
+    <div class="flex flex-wrap gap-3">
+      <RouterLink
+        class="rounded-app bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-hover"
+        :to="{ name: 'cashier-random-training' }"
+        >Случайная тренировка</RouterLink
+      >
+      <RouterLink
+        class="rounded-app border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink hover:bg-canvas"
+        :to="{ name: 'cashier-exams' }"
+        >Каталог экзаменов</RouterLink
+      >
+    </div>
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <RouterLink
         v-for="link in [

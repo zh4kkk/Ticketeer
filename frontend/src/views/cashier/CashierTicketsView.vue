@@ -10,13 +10,7 @@ import Pagination from '@/components/CatalogPagination.vue'
 import StatusLabel from '@/components/StatusLabel.vue'
 import type { CatalogTicketListResponse, CatalogTopicResponse } from '@/types/catalog'
 import type { PagedResponse } from '@/types/api'
-import {
-  parseBoolean,
-  parsePage,
-  parsePositiveInt,
-  parseSearch,
-  queryString,
-} from '@/utils/routeQuery'
+import { parseBoolean, parsePage, parsePositiveInt, parseSearch } from '@/utils/routeQuery'
 const route = useRoute()
 const router = useRouter()
 const pageSize = 20
@@ -46,9 +40,10 @@ function message(e: unknown): string {
   return e instanceof ApiError ? e.message : 'Не удалось загрузить билеты.'
 }
 function sync() {
-  search.value = queryString('search')
+  search.value = parseSearch(route.query.search)
   topicId.value = parseTopic()?.toString() || ''
-  status.value = queryString('isCompleted')
+  const completed = parseStatus()
+  status.value = completed === undefined ? '' : String(completed)
 }
 async function load() {
   controller?.abort()
@@ -139,6 +134,11 @@ onBeforeUnmount(() => {
       <p class="text-sm font-semibold uppercase tracking-wider text-brand">Практика</p>
       <h1 class="mt-2 text-3xl font-bold text-ink">Тренировочные билеты</h1>
     </div>
+    <RouterLink
+      class="inline-flex rounded-app bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-hover"
+      :to="{ name: 'cashier-random-training' }"
+      >Случайная тренировка</RouterLink
+    >
     <form
       class="grid gap-3 rounded-app border border-line bg-surface p-4 md:grid-cols-[2fr_1fr_1fr_auto]"
       @submit.prevent="apply"
