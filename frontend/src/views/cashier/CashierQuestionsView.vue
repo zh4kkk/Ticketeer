@@ -69,7 +69,7 @@ function apply() {
 }
 function changePage(p: number) {
   if (result.value && p >= 1 && p <= Math.ceil(result.value.totalCount / pageSize))
-    void router.replace({ query: { ...route.query, page: String(p) } })
+    void router.push({ query: { ...route.query, page: String(p) } })
 }
 function reset() {
   search.value = ''

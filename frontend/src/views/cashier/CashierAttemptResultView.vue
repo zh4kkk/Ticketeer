@@ -7,7 +7,7 @@ import AppButton from '@/components/AppButton.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import type { AttemptResponse } from '@/types/attempts'
-import { AttemptKindValue, AttemptStatusValue } from '@/types/attempts'
+import { AttemptKindValue, AttemptSourceValue, AttemptStatusValue } from '@/types/attempts'
 import { parsePositiveInt } from '@/utils/routeQuery'
 
 const route = useRoute()
@@ -91,11 +91,15 @@ onBeforeUnmount(() => {
     <template v-else-if="attempt">
       <div>
         <p class="text-sm font-semibold uppercase tracking-wider text-brand">
-          {{ attempt.kind === 0 ? 'Тренировка' : 'Экзамен' }}
+          {{ attempt.kind === AttemptKindValue.Training ? 'Тренировка' : 'Экзамен' }}
         </p>
         <h1 class="mt-2 text-3xl font-bold text-ink">{{ statusText }}</h1>
         <p class="mt-2 text-muted">
-          {{ attempt.source === 0 ? 'Подготовленный вариант' : 'Случайная подборка' }}
+          {{
+            attempt.source === AttemptSourceValue.Prepared
+              ? 'Подготовленный вариант'
+              : 'Случайная подборка'
+          }}
         </p>
       </div>
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -129,7 +133,12 @@ onBeforeUnmount(() => {
           >На главную</AppButton
         ><AppButton
           variant="secondary"
-          @click="router.push({ name: attempt.kind === 0 ? 'cashier-tickets' : 'cashier-exams' })"
+          @click="
+            router.push({
+              name:
+                attempt.kind === AttemptKindValue.Training ? 'cashier-tickets' : 'cashier-exams',
+            })
+          "
           >К каталогу</AppButton
         >
       </div>

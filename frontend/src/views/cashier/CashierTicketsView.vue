@@ -85,7 +85,7 @@ function changePage(p: number) {
   if (p < 1 || !result.value) return
   const max = Math.ceil(result.value.totalCount / pageSize)
   if (p > max) return
-  void router.replace({ query: { ...route.query, page: String(p) } })
+  void router.push({ query: { ...route.query, page: String(p) } })
 }
 function reset() {
   search.value = ''

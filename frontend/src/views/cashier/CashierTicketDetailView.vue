@@ -11,6 +11,7 @@ import LoadingState from '@/components/LoadingState.vue'
 import StatusLabel from '@/components/StatusLabel.vue'
 import type { CatalogTicketResponse } from '@/types/catalog'
 import { parsePositiveInt } from '@/utils/routeQuery'
+import { getSessionGeneration } from '@/api/session'
 const route = useRoute()
 const router = useRouter()
 const item = ref<CatalogTicketResponse | null>(null)
@@ -20,6 +21,8 @@ const startError = ref('')
 const starting = ref(false)
 let controller: AbortController | null = null
 let requestId = 0
+let startRequestId = 0
+let destroyed = false
 const id = () => {
   return parsePositiveInt(route.params.id)
 }
@@ -53,20 +56,43 @@ async function load() {
     if (request === requestId) loading.value = false
   }
 }
-watch(() => route.params.id, load, { immediate: true })
+watch(
+  () => route.params.id,
+  () => {
+    startRequestId += 1
+    void load()
+  },
+  { immediate: true },
+)
 onBeforeUnmount(() => {
+  destroyed = true
+  startRequestId += 1
   requestId += 1
   controller?.abort()
 })
 async function startTraining(): Promise<void> {
   if (!item.value || starting.value) return
+  const operation = ++startRequestId
+  const operationSession = getSessionGeneration()
+  const ticketId = item.value.id
   starting.value = true
   startError.value = ''
   try {
-    const response = await startTrainingTicket(item.value.id)
+    const response = await startTrainingTicket(ticketId)
+    if (
+      destroyed ||
+      operation !== startRequestId ||
+      operationSession !== getSessionGeneration() ||
+      id() !== ticketId
+    )
+      return
     await router.push({ name: 'cashier-attempt', params: { id: response.id } })
   } catch (e) {
-    startError.value = e instanceof ApiError ? e.message : 'Не удалось начать тренировку.'
+    if (!destroyed && operation === startRequestId && operationSession === getSessionGeneration())
+      startError.value =
+        e instanceof ApiError
+          ? e.message
+          : 'Не удалось начать тренировку. Попытка могла быть создана; проверьте незавершённые попытки.'
   } finally {
     starting.value = false
   }

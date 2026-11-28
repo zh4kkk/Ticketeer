@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAttempt, submitAttemptAnswer } from '@/api/attempts'
 import { ApiAbortError, ApiError } from '@/api/http'
@@ -7,8 +7,9 @@ import AppButton from '@/components/AppButton.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import type { AttemptQuestionResponse, AttemptResponse } from '@/types/attempts'
-import { AttemptKindValue, AttemptStatusValue } from '@/types/attempts'
+import { AttemptKindValue, AttemptSourceValue, AttemptStatusValue } from '@/types/attempts'
 import { parsePositiveInt } from '@/utils/routeQuery'
+import { getSessionGeneration } from '@/api/session'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,6 +18,9 @@ const currentIndex = ref(0)
 const selectedOption = ref<number | null>(null)
 const loading = ref(false)
 const submitting = ref(false)
+const synchronizing = ref(false)
+const uncertainAnswer = ref(false)
+const needsManualCheck = ref(false)
 const error = ref('')
 const syncMessage = ref('')
 const now = ref(Date.now())
@@ -25,6 +29,8 @@ let requestId = 0
 let stateVersion = 0
 let timer: ReturnType<typeof setInterval> | undefined
 let timeoutRefreshes = 0
+let loadPromise: Promise<void> | null = null
+let destroyed = false
 
 const attemptId = computed(() => parsePositiveInt(route.params.id))
 const currentQuestion = computed<AttemptQuestionResponse | null>(
@@ -55,6 +61,8 @@ const canAnswer = computed(
     !!attempt.value &&
     !isFinished.value &&
     !submitting.value &&
+    !synchronizing.value &&
+    !uncertainAnswer.value &&
     !!currentQuestion.value &&
     remainingSeconds.value !== 0,
 )
@@ -71,44 +79,80 @@ function syncSelection(): void {
   selectedOption.value = currentQuestion.value?.selectedOptionPosition ?? null
 }
 
+function applyAttempt(response: AttemptResponse, preferredQuestionId?: number): void {
+  const previousQuestionId = preferredQuestionId ?? currentQuestion.value?.id
+  attempt.value = response
+  const preferredIndex = previousQuestionId
+    ? response.questions.findIndex((question) => question.id === previousQuestionId)
+    : -1
+  if (preferredIndex >= 0) currentIndex.value = preferredIndex
+  else if (response.status === AttemptStatusValue.InProgress) selectFirstUnanswered(response)
+  else currentIndex.value = Math.min(currentIndex.value, Math.max(0, response.questions.length - 1))
+  const selected = response.questions[currentIndex.value]
+  if (selected?.answeredAt || selectedOption.value === null || !selected) syncSelection()
+  now.value = Date.now()
+  updateTimer()
+}
+
 function selectFirstUnanswered(response: AttemptResponse): void {
   const index = response.questions.findIndex((question) => !question.answeredAt)
   currentIndex.value = index >= 0 ? index : 0
   syncSelection()
 }
 
-async function load(): Promise<void> {
-  controller?.abort()
+async function load(background = false): Promise<void> {
+  if (loadPromise) return loadPromise
   const id = ++requestId
   const version = stateVersion
   const value = attemptId.value
-  attempt.value = null
-  error.value = ''
+  const operationSession = getSessionGeneration()
+  if (!background) {
+    attempt.value = null
+    error.value = ''
+  }
   if (!value) {
     loading.value = false
     error.value = 'Некорректный идентификатор попытки.'
     return
   }
-  controller = new AbortController()
-  loading.value = true
-  try {
-    const response = await getAttempt(value, controller.signal)
-    if (id !== requestId || version !== stateVersion) return
-    attempt.value = response
-    timeoutRefreshes = 0
-    selectFirstUnanswered(response)
-    syncMessage.value = ''
-  } catch (e) {
-    if (e instanceof ApiAbortError || id !== requestId) return
-    error.value =
-      e instanceof ApiError && e.status === 404
-        ? 'Попытка не найдена.'
-        : e instanceof ApiError
-          ? e.message
-          : 'Не удалось загрузить попытку.'
-  } finally {
-    if (id === requestId) loading.value = false
-  }
+  const currentController = new AbortController()
+  controller = currentController
+  if (!background) loading.value = true
+  loadPromise = (async () => {
+    try {
+      const response = await getAttempt(value, currentController.signal)
+      if (
+        destroyed ||
+        id !== requestId ||
+        version !== stateVersion ||
+        operationSession !== getSessionGeneration() ||
+        value !== attemptId.value
+      )
+        return
+      applyAttempt(response)
+      timeoutRefreshes = 0
+      syncMessage.value = ''
+    } catch (e) {
+      if (
+        e instanceof ApiAbortError ||
+        id !== requestId ||
+        version !== stateVersion ||
+        operationSession !== getSessionGeneration()
+      )
+        return
+      error.value =
+        e instanceof ApiError && e.status === 404
+          ? 'Попытка не найдена.'
+          : e instanceof ApiError
+            ? e.message
+            : 'Не удалось загрузить попытку.'
+    } finally {
+      if (id === requestId && !background) loading.value = false
+    }
+  })().finally(() => {
+    loadPromise = null
+  })
+  return loadPromise
 }
 
 function goTo(index: number): void {
@@ -117,42 +161,76 @@ function goTo(index: number): void {
   syncSelection()
 }
 
-async function refreshAfterUncertain(): Promise<void> {
+async function refreshAfterUncertain(): Promise<boolean> {
   const value = attemptId.value
-  if (!value) return
-  const response = await getAttempt(value)
-  if (value !== attemptId.value) return
-  attempt.value = response
-  const questionIndex = response.questions.findIndex(
-    (question) => question.id === currentQuestion.value?.id,
-  )
-  if (questionIndex >= 0) currentIndex.value = questionIndex
-  syncSelection()
+  if (!value || synchronizing.value || submitting.value) return false
+  synchronizing.value = true
+  const operationSession = getSessionGeneration()
+  try {
+    const response = await getAttempt(value)
+    if (destroyed || value !== attemptId.value || operationSession !== getSessionGeneration())
+      return false
+    const question = response.questions.find((item) => item.id === pendingQuestionId)
+    applyAttempt(response, currentQuestion.value?.id ?? pendingQuestionId ?? undefined)
+    if (
+      (pendingQuestionId !== null && question?.answeredAt) ||
+      response.status !== AttemptStatusValue.InProgress
+    ) {
+      uncertainAnswer.value = false
+      needsManualCheck.value = false
+      if (question?.answeredAt) pendingQuestionId = null
+    } else {
+      if (pendingQuestionId === null) {
+        uncertainAnswer.value = true
+        needsManualCheck.value = true
+      } else {
+        uncertainAnswer.value = false
+        needsManualCheck.value = false
+      }
+    }
+    return true
+  } finally {
+    synchronizing.value = false
+  }
 }
+
+let pendingQuestionId: number | null = null
 
 async function submit(): Promise<void> {
   const value = attemptId.value
   const question = currentQuestion.value
-  if (!value || !question || selectedOption.value === null || !canAnswer.value) return
+  if (
+    !value ||
+    !question ||
+    question.answeredAt ||
+    selectedOption.value === null ||
+    !canAnswer.value
+  )
+    return
   submitting.value = true
   stateVersion += 1
   syncMessage.value = ''
   const questionId = question.id
+  const submittedPosition = selectedOption.value
+  pendingQuestionId = questionId
+  const operationSession = getSessionGeneration()
   try {
     const response = await submitAttemptAnswer(value, questionId, {
-      selectedOptionPosition: selectedOption.value,
+      selectedOptionPosition: submittedPosition,
     })
-    if (value !== attemptId.value || questionId !== currentQuestion.value?.id) return
-    attempt.value = response
-    const updatedIndex = response.questions.findIndex((item) => item.id === questionId)
-    if (updatedIndex >= 0) currentIndex.value = updatedIndex
-    syncSelection()
+    if (value !== attemptId.value || operationSession !== getSessionGeneration() || destroyed)
+      return
+    applyAttempt(response, questionId)
+    pendingQuestionId = null
+    uncertainAnswer.value = false
+    needsManualCheck.value = false
   } catch (e) {
-    if (e instanceof ApiError && [0, 409].includes(e.status)) {
+    if (e instanceof ApiError && (e.status === 0 || e.status === 409 || e.status >= 500)) {
+      uncertainAnswer.value = true
+      needsManualCheck.value = true
       syncMessage.value = 'Проверяем состояние ответа на сервере…'
       try {
-        await refreshAfterUncertain()
-        syncMessage.value = 'Состояние попытки обновлено.'
+        if (await refreshAfterUncertain()) syncMessage.value = 'Состояние попытки обновлено.'
       } catch {
         syncMessage.value = 'Не удалось уточнить состояние ответа. Повторите проверку позже.'
       }
@@ -164,23 +242,34 @@ async function submit(): Promise<void> {
   }
 }
 
-function startTimer(): void {
+function updateTimer(): void {
+  stopTimer()
+  if (
+    attempt.value?.kind !== AttemptKindValue.Exam ||
+    attempt.value.status !== AttemptStatusValue.InProgress
+  )
+    return
   timer = setInterval(() => {
     now.value = Date.now()
     if (
       remainingSeconds.value === 0 &&
-      attempt.value?.status === AttemptStatusValue.InProgress &&
+      !synchronizing.value &&
+      !submitting.value &&
       timeoutRefreshes < 3
     ) {
       timeoutRefreshes += 1
       void refreshAfterUncertain().catch(() => {
+        needsManualCheck.value = true
+        uncertainAnswer.value = true
         syncMessage.value = 'Время истекло. Проверьте состояние попытки на сервере.'
       })
     } else if (
       remainingSeconds.value === 0 &&
       attempt.value?.status === AttemptStatusValue.InProgress
     ) {
-      syncMessage.value = 'Время истекло. Сервер ещё не подтвердил завершение попытки.'
+      needsManualCheck.value = true
+      uncertainAnswer.value = true
+      syncMessage.value = 'Время истекло. Проверьте состояние попытки на сервере.'
     }
   }, 1000)
 }
@@ -194,23 +283,38 @@ function handleVisibility(): void {
   now.value = Date.now()
   if (
     document.visibilityState === 'visible' &&
-    attempt.value?.status === AttemptStatusValue.InProgress
+    attempt.value?.status === AttemptStatusValue.InProgress &&
+    !submitting.value &&
+    !synchronizing.value
   )
-    void load()
+    void load(true)
 }
 
 watch(attemptId, () => {
   requestId += 1
+  stateVersion += 1
+  controller?.abort()
+  attempt.value = null
+  now.value = Date.now()
   stopTimer()
-  void load()
+  void nextTick(() => {
+    if (loadPromise) {
+      void loadPromise.finally(() => {
+        if (!destroyed) void load()
+      })
+    } else {
+      void load()
+    }
+  })
 })
 onMounted(() => {
   void load()
-  startTimer()
   document.addEventListener('visibilitychange', handleVisibility)
 })
 onBeforeUnmount(() => {
+  destroyed = true
   requestId += 1
+  stateVersion += 1
   controller?.abort()
   stopTimer()
   document.removeEventListener('visibilitychange', handleVisibility)
@@ -226,11 +330,15 @@ onBeforeUnmount(() => {
         </p>
         <h1 class="mt-2 text-3xl font-bold text-ink">Прохождение</h1>
         <p v-if="attempt" class="mt-2 text-sm text-muted">
-          {{ attempt.source === 0 ? 'Подготовленный вариант' : 'Случайная подборка' }}
+          {{
+            attempt.source === AttemptSourceValue.Prepared
+              ? 'Подготовленный вариант'
+              : 'Случайная подборка'
+          }}
         </p>
       </div>
       <div
-        v-if="isExam && formattedRemaining"
+        v-if="isExam && !isFinished && formattedRemaining"
         class="rounded-app bg-secondary-soft px-4 py-3 text-lg font-bold text-secondary"
         aria-live="polite"
       >
@@ -268,6 +376,7 @@ onBeforeUnmount(() => {
                 ? 'border-success bg-success-soft text-success'
                 : 'border-line bg-surface text-ink'
           "
+          :disabled="submitting || synchronizing"
           @click="goTo(index)"
         >
           {{ index + 1 }}
@@ -331,7 +440,7 @@ onBeforeUnmount(() => {
         <div class="mt-6 flex flex-wrap justify-between gap-3">
           <AppButton
             variant="secondary"
-            :disabled="currentIndex === 0"
+            :disabled="currentIndex === 0 || submitting || synchronizing"
             @click="goTo(currentIndex - 1)"
             >Назад</AppButton
           ><AppButton
@@ -342,17 +451,30 @@ onBeforeUnmount(() => {
             >Ответить</AppButton
           ><AppButton
             v-else
-            :disabled="currentIndex >= attempt.questions.length - 1"
+            :disabled="currentIndex >= attempt.questions.length - 1 || submitting || synchronizing"
             @click="goTo(currentIndex + 1)"
             >Следующий вопрос</AppButton
           >
         </div>
       </article>
       <div
+        v-if="needsManualCheck"
+        class="rounded-app border border-warning bg-warning-soft p-4 text-sm text-warning"
+      >
+        <p>Состояние последнего ответа не удалось подтвердить автоматически.</p>
+        <AppButton
+          class="mt-3"
+          variant="secondary"
+          :loading="synchronizing"
+          @click="refreshAfterUncertain"
+          >Проверить состояние попытки</AppButton
+        >
+      </div>
+      <div
         v-if="isFinished"
         class="rounded-app border p-4"
         :class="
-          attempt.status === 1
+          attempt.status === AttemptStatusValue.Completed
             ? 'border-success bg-success-soft text-success'
             : 'border-danger bg-danger-soft text-danger'
         "

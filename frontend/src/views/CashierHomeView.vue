@@ -2,20 +2,27 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getCatalogTopics } from '@/api/catalog'
+import { getInProgressAttempts } from '@/api/attempts'
 import { ApiAbortError, ApiError } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { CatalogTopicResponse } from '@/types/catalog'
+import { AttemptKindValue, AttemptSourceValue, type AttemptHistoryItem } from '@/types/attempts'
 const auth = useAuthStore()
 const router = useRouter()
 const topics = ref<CatalogTopicResponse[]>([])
 const search = ref('')
 const loading = ref(false)
 const error = ref('')
+const attempts = ref<AttemptHistoryItem[]>([])
+const attemptsLoading = ref(false)
+const attemptsError = ref('')
 let controller: AbortController | null = null
+let attemptsController: AbortController | null = null
 let requestId = 0
+let attemptsRequestId = 0
 async function loadTopics(): Promise<void> {
   controller?.abort()
   controller = new AbortController()
@@ -38,9 +45,39 @@ function searchQuestions(): void {
   void router.push({ name: 'cashier-questions', query: value ? { search: value } : {} })
 }
 onMounted(loadTopics)
+async function loadAttempts(): Promise<void> {
+  attemptsController?.abort()
+  const currentController = new AbortController()
+  attemptsController = currentController
+  const id = ++attemptsRequestId
+  attemptsLoading.value = true
+  attemptsError.value = ''
+  try {
+    const response = await getInProgressAttempts(currentController.signal)
+    if (id !== attemptsRequestId) return
+    attempts.value = response.items
+  } catch (e) {
+    if (e instanceof ApiAbortError || id !== attemptsRequestId) return
+    attemptsError.value =
+      e instanceof ApiError ? e.message : 'Не удалось загрузить незавершённые попытки.'
+  } finally {
+    if (id === attemptsRequestId) attemptsLoading.value = false
+  }
+}
+function attemptTitle(attempt: AttemptHistoryItem): string {
+  return attempt.kind === AttemptKindValue.Training
+    ? attempt.ticketTitle || 'Тренировка'
+    : attempt.examTitle || 'Экзамен'
+}
+function attemptDescription(attempt: AttemptHistoryItem): string {
+  return `${attempt.source === AttemptSourceValue.Prepared ? 'Подготовленный' : 'Случайный'} вариант · ${attempt.questionCount} вопросов`
+}
+onMounted(loadAttempts)
 onBeforeUnmount(() => {
   requestId += 1
   controller?.abort()
+  attemptsRequestId += 1
+  attemptsController?.abort()
 })
 </script>
 
@@ -87,6 +124,42 @@ onBeforeUnmount(() => {
         >Каталог экзаменов</RouterLink
       >
     </div>
+    <section v-if="attemptsLoading || attemptsError || attempts.length" class="space-y-3">
+      <div class="flex items-end justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-bold text-ink">Незавершённые попытки</h2>
+          <p class="mt-1 text-sm text-muted">Продолжение не создаёт новую попытку.</p>
+        </div>
+      </div>
+      <LoadingState v-if="attemptsLoading" />
+      <div
+        v-else-if="attemptsError"
+        class="rounded-app border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+      >
+        {{ attemptsError }}
+        <button class="ml-2 font-semibold underline" type="button" @click="loadAttempts">
+          Повторить
+        </button>
+      </div>
+      <div v-else class="grid gap-3 md:grid-cols-2">
+        <article
+          v-for="attempt in attempts"
+          :key="attempt.id"
+          class="rounded-app border border-line bg-surface p-4 shadow-sm"
+        >
+          <p class="font-semibold text-ink">{{ attemptTitle(attempt) }}</p>
+          <p class="mt-1 text-sm text-muted">{{ attemptDescription(attempt) }}</p>
+          <p class="mt-1 text-sm text-muted">
+            Начата: {{ new Date(attempt.startedAt).toLocaleString('ru-RU') }}
+          </p>
+          <RouterLink
+            class="mt-3 inline-flex text-sm font-semibold text-secondary hover:underline"
+            :to="{ name: 'cashier-attempt', params: { id: attempt.id } }"
+            >Продолжить</RouterLink
+          >
+        </article>
+      </div>
+    </section>
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <RouterLink
         v-for="link in [

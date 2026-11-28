@@ -22,7 +22,10 @@ export default defineConfig({
       line: 'var(--rzd-line)',
       danger: '#b42318',
       success: '#18794e',
+      'success-soft': 'var(--semantic-success-soft)',
       warning: '#a15c00',
+      'warning-soft': 'var(--semantic-warning-soft)',
+      'danger-soft': 'var(--semantic-danger-soft)',
     },
     borderRadius: {
       app: '0.75rem',

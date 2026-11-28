@@ -9,17 +9,21 @@ import ErrorState from '@/components/ErrorState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import type { CatalogTopicResponse } from '@/types/catalog'
 import { parsePositiveInt } from '@/utils/routeQuery'
+import { getSessionGeneration } from '@/api/session'
 
 const route = useRoute()
 const router = useRouter()
 const topics = ref<CatalogTopicResponse[]>([])
 const selectedTopicId = ref(parsePositiveInt(route.query.topicId)?.toString() ?? '')
-const questionCount = ref(1)
+const questionCount = ref<number | string>(1)
 const loading = ref(true)
 const starting = ref(false)
 const error = ref('')
 const topicsError = ref('')
 let controller: AbortController | null = null
+let topicsRequestId = 0
+let startRequestId = 0
+let destroyed = false
 
 const selectedTopic = computed(() =>
   topics.value.find((topic) => String(topic.id) === selectedTopicId.value),
@@ -28,22 +32,27 @@ const maxQuestions = computed(() => selectedTopic.value?.questionCount ?? 0)
 
 function normalizeCount(): void {
   const max = maxQuestions.value
-  questionCount.value = max > 0 ? Math.min(Math.max(1, questionCount.value), max) : 1
+  const value = Number(questionCount.value)
+  questionCount.value =
+    max > 0 && Number.isFinite(value) ? Math.min(Math.max(1, Math.trunc(value)), max) : 1
 }
 
 async function loadTopics(): Promise<void> {
   controller?.abort()
+  const requestId = ++topicsRequestId
   const currentController = new AbortController()
   controller = currentController
   loading.value = true
   topicsError.value = ''
   try {
-    topics.value = await getCatalogTopics({ signal: currentController.signal })
+    const response = await getCatalogTopics({ signal: currentController.signal })
+    if (requestId !== topicsRequestId || destroyed) return
+    topics.value = response
     if (!selectedTopic.value && topics.value.length && topics.value[0])
       selectedTopicId.value = String(topics.value[0].id)
     normalizeCount()
   } catch (e) {
-    if (!(e instanceof ApiAbortError))
+    if (!(e instanceof ApiAbortError) && requestId === topicsRequestId && !destroyed)
       topicsError.value = e instanceof ApiError ? e.message : 'Не удалось загрузить темы.'
   } finally {
     if (!currentController.signal.aborted) loading.value = false
@@ -55,22 +64,46 @@ function selectTopic(): void {
 }
 
 async function start(): Promise<void> {
-  const topicId = Number(selectedTopicId.value)
-  if (!selectedTopic.value || !Number.isInteger(topicId) || questionCount.value < 1) return
+  const topicId = parsePositiveInt(selectedTopicId.value)
+  const count = Number(questionCount.value)
+  if (starting.value) return
+  if (
+    !selectedTopic.value ||
+    topicId === undefined ||
+    !Number.isSafeInteger(count) ||
+    count < 1 ||
+    count > selectedTopic.value.questionCount
+  ) {
+    error.value = 'Выберите тему и укажите целое количество вопросов от 1 до доступного числа.'
+    return
+  }
+  const operation = ++startRequestId
+  const operationSession = getSessionGeneration()
   starting.value = true
   error.value = ''
   try {
-    const response = await startRandomTraining({ topicId, questionCount: questionCount.value })
+    const response = await startRandomTraining({ topicId, questionCount: count })
+    if (destroyed || operation !== startRequestId || operationSession !== getSessionGeneration())
+      return
     await router.push({ name: 'cashier-attempt', params: { id: response.id } })
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось начать тренировку.'
+    if (!destroyed && operation === startRequestId && operationSession === getSessionGeneration())
+      error.value =
+        e instanceof ApiError
+          ? e.message
+          : 'Не удалось начать тренировку. Попытка могла быть создана; проверьте незавершённые попытки.'
   } finally {
     starting.value = false
   }
 }
 
 onMounted(() => void loadTopics())
-onBeforeUnmount(() => controller?.abort())
+onBeforeUnmount(() => {
+  destroyed = true
+  topicsRequestId += 1
+  startRequestId += 1
+  controller?.abort()
+})
 </script>
 
 <template>
@@ -88,7 +121,13 @@ onBeforeUnmount(() => controller?.abort())
       @submit.prevent="start"
     >
       <label class="block text-sm font-semibold text-ink" for="random-topic">Тема</label>
-      <select id="random-topic" v-model="selectedTopicId" class="app-input" @change="selectTopic">
+      <select
+        id="random-topic"
+        v-model="selectedTopicId"
+        class="app-input"
+        :disabled="starting"
+        @change="selectTopic"
+      >
         <option value="" disabled>Выберите тему</option>
         <option v-for="topic in topics" :key="topic.id" :value="String(topic.id)">
           {{ topic.name }}
@@ -107,7 +146,7 @@ onBeforeUnmount(() => controller?.abort())
         type="number"
         min="1"
         :max="maxQuestions || 1"
-        :disabled="!selectedTopic"
+        :disabled="!selectedTopic || starting"
         @change="normalizeCount"
       />
       <p v-if="error" class="text-sm text-danger">{{ error }}</p>

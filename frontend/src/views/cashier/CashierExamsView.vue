@@ -11,6 +11,7 @@ import Pagination from '@/components/CatalogPagination.vue'
 import type { CatalogExamResponse } from '@/types/catalog'
 import type { PagedResponse } from '@/types/api'
 import { parsePage, parseSearch } from '@/utils/routeQuery'
+import { getSessionGeneration } from '@/api/session'
 const route = useRoute()
 const router = useRouter()
 const pageSize = 20
@@ -22,6 +23,8 @@ const startingRandom = ref(false)
 const randomError = ref('')
 let controller: AbortController | null = null
 let requestId = 0
+let startRequestId = 0
+let destroyed = false
 function formatTime(seconds: number): string {
   if (seconds < 60) return `${seconds} сек.`
   const minutes = Math.floor(seconds / 60)
@@ -67,30 +70,47 @@ function resetSearch(): void {
 }
 async function startRandom(): Promise<void> {
   if (startingRandom.value) return
+  if (
+    !window.confirm(
+      'Начать случайный экзамен? 10 вопросов, 20 минут и не более двух ошибок. Время продолжит идти после обновления страницы.',
+    )
+  )
+    return
+  const operation = ++startRequestId
+  const operationSession = getSessionGeneration()
   startingRandom.value = true
   randomError.value = ''
   try {
     const response = await startRandomExam()
+    if (destroyed || operation !== startRequestId || operationSession !== getSessionGeneration())
+      return
     await router.push({ name: 'cashier-attempt', params: { id: response.id } })
   } catch (e) {
-    randomError.value = e instanceof ApiError ? e.message : 'Не удалось начать случайный экзамен.'
+    if (!destroyed && operation === startRequestId && operationSession === getSessionGeneration())
+      randomError.value =
+        e instanceof ApiError
+          ? e.message
+          : 'Не удалось начать случайный экзамен. Попытка могла быть создана; проверьте незавершённые попытки.'
   } finally {
     startingRandom.value = false
   }
 }
 function changePage(p: number) {
   if (result.value && p >= 1 && p <= Math.ceil(result.value.totalCount / pageSize))
-    void router.replace({ query: { ...route.query, page: String(p) } })
+    void router.push({ query: { ...route.query, page: String(p) } })
 }
 watch(
   () => route.query,
   () => {
+    startRequestId += 1
     search.value = q()
     void load()
   },
   { immediate: true },
 )
 onBeforeUnmount(() => {
+  destroyed = true
+  startRequestId += 1
   requestId += 1
   controller?.abort()
 })
