@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAttempt, submitAttemptAnswer } from '@/api/attempts'
 import { ApiAbortError, ApiError } from '@/api/http'
@@ -16,20 +16,23 @@ const router = useRouter()
 const attempt = ref<AttemptResponse | null>(null)
 const currentIndex = ref(0)
 const selectedOption = ref<number | null>(null)
-const loading = ref(false)
-const submitting = ref(false)
-const synchronizing = ref(false)
-const uncertainAnswer = ref(false)
-const needsManualCheck = ref(false)
+type AttemptPhase = 'loading' | 'ready' | 'submitting' | 'synchronizing' | 'requiresSync' | 'error'
+type SyncReason = 'answer' | 'timeout' | 'background'
+
+const phase = ref<AttemptPhase>('loading')
+const syncReason = ref<SyncReason | null>(null)
 const error = ref('')
 const syncMessage = ref('')
 const now = ref(Date.now())
-let controller: AbortController | null = null
-let requestId = 0
-let stateVersion = 0
+let readController: AbortController | null = null
+let lifecycleId = 0
+let readId = 0
 let timer: ReturnType<typeof setInterval> | undefined
+let timeoutRetryTimer: ReturnType<typeof setTimeout> | undefined
 let timeoutRefreshes = 0
-let loadPromise: Promise<void> | null = null
+let activeRead: Promise<boolean> | null = null
+let syncAfterPost = false
+let pendingQuestionId: number | null = null
 let destroyed = false
 
 const attemptId = computed(() => parsePositiveInt(route.params.id))
@@ -60,12 +63,15 @@ const canAnswer = computed(
   () =>
     !!attempt.value &&
     !isFinished.value &&
-    !submitting.value &&
-    !synchronizing.value &&
-    !uncertainAnswer.value &&
+    phase.value === 'ready' &&
     !!currentQuestion.value &&
+    !currentQuestion.value.answeredAt &&
     remainingSeconds.value !== 0,
 )
+const loading = computed(() => phase.value === 'loading')
+const submitting = computed(() => phase.value === 'submitting')
+const synchronizing = computed(() => phase.value === 'synchronizing')
+const needsManualCheck = computed(() => phase.value === 'requiresSync')
 
 function statusLabel(): string {
   if (!attempt.value) return ''
@@ -77,6 +83,15 @@ function statusLabel(): string {
 
 function syncSelection(): void {
   selectedOption.value = currentQuestion.value?.selectedOptionPosition ?? null
+}
+
+function isCurrent(life: number, value: number, session: number): boolean {
+  return (
+    !destroyed &&
+    life === lifecycleId &&
+    value === attemptId.value &&
+    session === getSessionGeneration()
+  )
 }
 
 function applyAttempt(response: AttemptResponse, preferredQuestionId?: number): void {
@@ -100,101 +115,133 @@ function selectFirstUnanswered(response: AttemptResponse): void {
   syncSelection()
 }
 
-async function load(background = false): Promise<void> {
-  if (loadPromise) return loadPromise
-  const id = ++requestId
-  const version = stateVersion
+async function readAttempt(background = false, reason: SyncReason | null = null): Promise<boolean> {
+  if (activeRead) return activeRead
   const value = attemptId.value
+  const life = lifecycleId
+  const operationId = ++readId
   const operationSession = getSessionGeneration()
   if (!background) {
     attempt.value = null
     error.value = ''
+    syncMessage.value = ''
+    phase.value = 'loading'
   }
   if (!value) {
-    loading.value = false
+    phase.value = 'error'
     error.value = 'Некорректный идентификатор попытки.'
-    return
+    return false
   }
   const currentController = new AbortController()
-  controller = currentController
-  if (!background) loading.value = true
-  loadPromise = (async () => {
+  readController = currentController
+  activeRead = (async () => {
     try {
       const response = await getAttempt(value, currentController.signal)
-      if (
-        destroyed ||
-        id !== requestId ||
-        version !== stateVersion ||
-        operationSession !== getSessionGeneration() ||
-        value !== attemptId.value
-      )
-        return
+      if (!isCurrent(life, value, operationSession) || operationId !== readId) return false
       applyAttempt(response)
-      timeoutRefreshes = 0
-      syncMessage.value = ''
+      error.value = ''
+      if (reason !== 'timeout' || response.status !== AttemptStatusValue.InProgress) {
+        timeoutRefreshes = 0
+      }
+      if (response.status === AttemptStatusValue.InProgress) {
+        phase.value = 'ready'
+      } else {
+        phase.value = 'ready'
+      }
+      if (reason !== 'answer') syncMessage.value = ''
+      return true
     } catch (e) {
       if (
         e instanceof ApiAbortError ||
-        id !== requestId ||
-        version !== stateVersion ||
-        operationSession !== getSessionGeneration()
+        !isCurrent(life, value, operationSession) ||
+        operationId !== readId
       )
-        return
+        return false
       error.value =
         e instanceof ApiError && e.status === 404
           ? 'Попытка не найдена.'
           : e instanceof ApiError
             ? e.message
             : 'Не удалось загрузить попытку.'
+      if (background) phase.value = 'requiresSync'
+      else phase.value = 'error'
+      return false
     } finally {
-      if (id === requestId && !background) loading.value = false
+      if (operationId === readId && readController === currentController) {
+        readController = null
+      }
     }
   })().finally(() => {
-    loadPromise = null
+    if (operationId === readId) activeRead = null
   })
-  return loadPromise
+  return activeRead
+}
+
+function load(): Promise<boolean> {
+  return readAttempt()
 }
 
 function goTo(index: number): void {
-  if (!attempt.value || index < 0 || index >= attempt.value.questions.length) return
+  if (
+    phase.value !== 'ready' ||
+    !attempt.value ||
+    index < 0 ||
+    index >= attempt.value.questions.length
+  )
+    return
   currentIndex.value = index
   syncSelection()
 }
 
-async function refreshAfterUncertain(): Promise<boolean> {
-  const value = attemptId.value
-  if (!value || synchronizing.value || submitting.value) return false
-  synchronizing.value = true
-  const operationSession = getSessionGeneration()
-  try {
-    const response = await getAttempt(value)
-    if (destroyed || value !== attemptId.value || operationSession !== getSessionGeneration())
-      return false
-    const question = response.questions.find((item) => item.id === pendingQuestionId)
-    applyAttempt(response, currentQuestion.value?.id ?? pendingQuestionId ?? undefined)
-    if (
-      (pendingQuestionId !== null && question?.answeredAt) ||
-      response.status !== AttemptStatusValue.InProgress
-    ) {
-      uncertainAnswer.value = false
-      needsManualCheck.value = false
-      if (question?.answeredAt) pendingQuestionId = null
-    } else {
-      if (pendingQuestionId === null) {
-        uncertainAnswer.value = true
-        needsManualCheck.value = true
-      } else {
-        uncertainAnswer.value = false
-        needsManualCheck.value = false
-      }
-    }
-    return true
-  } finally {
-    synchronizing.value = false
+async function synchronize(reason: SyncReason): Promise<boolean> {
+  if (destroyed || !attemptId.value) return false
+  if (phase.value === 'submitting') {
+    syncAfterPost = true
+    syncReason.value = reason
+    return false
   }
+  if (activeRead) return activeRead
+  syncReason.value = reason
+  syncMessage.value =
+    reason === 'timeout'
+      ? 'Время истекло. Проверяем состояние попытки на сервере…'
+      : 'Проверяем состояние попытки на сервере…'
+  phase.value = 'synchronizing'
+  const life = lifecycleId
+  const value = attemptId.value
+  const session = getSessionGeneration()
+  const success = await readAttempt(true, reason)
+  if (!isCurrent(life, value, session)) return false
+  if (!success) {
+    phase.value = 'requiresSync'
+    syncMessage.value =
+      reason === 'timeout'
+        ? 'Время истекло. Проверьте состояние попытки на сервере.'
+        : 'Не удалось уточнить состояние ответа. Проверьте попытку вручную.'
+    return false
+  }
+  const pending = pendingQuestionId
+    ? attempt.value?.questions.find((question) => question.id === pendingQuestionId)
+    : undefined
+  if (
+    reason === 'answer' &&
+    pendingQuestionId !== null &&
+    !pending?.answeredAt &&
+    !isFinished.value
+  ) {
+    phase.value = 'ready'
+    syncMessage.value = 'Ответ не сохранён. Можно отправить его ещё раз вручную.'
+  } else {
+    pendingQuestionId = pending?.answeredAt ? null : pendingQuestionId
+    phase.value = 'ready'
+    if (reason !== 'timeout') syncMessage.value = 'Состояние попытки обновлено.'
+  }
+  return true
 }
 
-let pendingQuestionId: number | null = null
+async function manualSync(): Promise<void> {
+  await synchronize(syncReason.value ?? 'background')
+}
 
 async function submit(): Promise<void> {
   const value = attemptId.value
@@ -207,8 +254,14 @@ async function submit(): Promise<void> {
     !canAnswer.value
   )
     return
-  submitting.value = true
-  stateVersion += 1
+  if (!question.options.some((option) => option.position === selectedOption.value)) return
+  if (isExam.value && deadline.value !== null && Date.now() >= deadline.value) {
+    phase.value = 'requiresSync'
+    syncReason.value = 'timeout'
+    await synchronize('timeout')
+    return
+  }
+  phase.value = 'submitting'
   syncMessage.value = ''
   const questionId = question.id
   const submittedPosition = selectedOption.value
@@ -222,23 +275,33 @@ async function submit(): Promise<void> {
       return
     applyAttempt(response, questionId)
     pendingQuestionId = null
-    uncertainAnswer.value = false
-    needsManualCheck.value = false
+    phase.value = 'ready'
+    syncReason.value = null
   } catch (e) {
-    if (e instanceof ApiError && (e.status === 0 || e.status === 409 || e.status >= 500)) {
-      uncertainAnswer.value = true
-      needsManualCheck.value = true
+    if (value !== attemptId.value || operationSession !== getSessionGeneration() || destroyed)
+      return
+    const uncertain =
+      e instanceof ApiAbortError ||
+      (e instanceof ApiError &&
+        (e.kind === 'parse' || e.status === 0 || e.status === 409 || e.status >= 500))
+    if (uncertain) {
+      phase.value = 'synchronizing'
+      syncReason.value = 'answer'
       syncMessage.value = 'Проверяем состояние ответа на сервере…'
-      try {
-        if (await refreshAfterUncertain()) syncMessage.value = 'Состояние попытки обновлено.'
-      } catch {
-        syncMessage.value = 'Не удалось уточнить состояние ответа. Повторите проверку позже.'
-      }
+      await synchronize('answer')
     } else if (!(e instanceof ApiAbortError)) {
       error.value = e instanceof ApiError ? e.message : 'Не удалось отправить ответ.'
+      phase.value = 'ready'
     }
   } finally {
-    submitting.value = false
+    if (value === attemptId.value && operationSession === getSessionGeneration() && !destroyed) {
+      if (syncAfterPost) {
+        syncAfterPost = false
+        void synchronize(syncReason.value ?? 'background')
+      } else if (phase.value === 'submitting') {
+        phase.value = 'ready'
+      }
+    }
   }
 }
 
@@ -251,24 +314,25 @@ function updateTimer(): void {
     return
   timer = setInterval(() => {
     now.value = Date.now()
-    if (
-      remainingSeconds.value === 0 &&
-      !synchronizing.value &&
-      !submitting.value &&
-      timeoutRefreshes < 3
-    ) {
+    if (remainingSeconds.value === 0) stopTimer()
+    if (remainingSeconds.value === 0 && timeoutRefreshes < 3) {
       timeoutRefreshes += 1
-      void refreshAfterUncertain().catch(() => {
-        needsManualCheck.value = true
-        uncertainAnswer.value = true
-        syncMessage.value = 'Время истекло. Проверьте состояние попытки на сервере.'
-      })
+      if (phase.value === 'submitting') {
+        syncAfterPost = true
+        syncReason.value = 'timeout'
+      } else {
+        clearTimeout(timeoutRetryTimer)
+        const life = lifecycleId
+        timeoutRetryTimer = setTimeout(() => {
+          if (life === lifecycleId && !destroyed) void synchronize('timeout')
+        }, 500)
+      }
     } else if (
       remainingSeconds.value === 0 &&
       attempt.value?.status === AttemptStatusValue.InProgress
     ) {
-      needsManualCheck.value = true
-      uncertainAnswer.value = true
+      phase.value = 'requiresSync'
+      syncReason.value = 'timeout'
       syncMessage.value = 'Время истекло. Проверьте состояние попытки на сервере.'
     }
   }, 1000)
@@ -284,38 +348,47 @@ function handleVisibility(): void {
   if (
     document.visibilityState === 'visible' &&
     attempt.value?.status === AttemptStatusValue.InProgress &&
-    !submitting.value &&
-    !synchronizing.value
+    phase.value !== 'submitting' &&
+    phase.value !== 'synchronizing'
   )
-    void load(true)
+    void synchronize('background')
 }
 
-watch(attemptId, () => {
-  requestId += 1
-  stateVersion += 1
-  controller?.abort()
-  attempt.value = null
-  now.value = Date.now()
-  stopTimer()
-  void nextTick(() => {
-    if (loadPromise) {
-      void loadPromise.finally(() => {
-        if (!destroyed) void load()
-      })
-    } else {
-      void load()
-    }
-  })
-})
+watch(
+  attemptId,
+  () => {
+    lifecycleId += 1
+    readId += 1
+    readController?.abort()
+    activeRead = null
+    clearTimeout(timeoutRetryTimer)
+    timeoutRetryTimer = undefined
+    attempt.value = null
+    currentIndex.value = 0
+    selectedOption.value = null
+    pendingQuestionId = null
+    syncAfterPost = false
+    syncReason.value = null
+    error.value = ''
+    syncMessage.value = ''
+    phase.value = 'loading'
+    timeoutRefreshes = 0
+    now.value = Date.now()
+    stopTimer()
+    void load()
+  },
+  { immediate: true },
+)
 onMounted(() => {
-  void load()
   document.addEventListener('visibilitychange', handleVisibility)
 })
 onBeforeUnmount(() => {
   destroyed = true
-  requestId += 1
-  stateVersion += 1
-  controller?.abort()
+  lifecycleId += 1
+  readId += 1
+  readController?.abort()
+  activeRead = null
+  clearTimeout(timeoutRetryTimer)
   stopTimer()
   document.removeEventListener('visibilitychange', handleVisibility)
 })
@@ -346,7 +419,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <LoadingState v-if="loading" />
-    <ErrorState v-else-if="error" :message="error" :retry="load" />
+    <ErrorState v-else-if="error && !attempt" :message="error" :retry="load" />
     <template v-else-if="attempt">
       <div class="rounded-app border border-line bg-surface p-4 shadow-sm">
         <div class="flex flex-wrap justify-between gap-2 text-sm font-semibold text-ink">
@@ -461,12 +534,14 @@ onBeforeUnmount(() => {
         v-if="needsManualCheck"
         class="rounded-app border border-warning bg-warning-soft p-4 text-sm text-warning"
       >
-        <p>Состояние последнего ответа не удалось подтвердить автоматически.</p>
-        <AppButton
-          class="mt-3"
-          variant="secondary"
-          :loading="synchronizing"
-          @click="refreshAfterUncertain"
+        <p>
+          {{
+            syncReason === 'timeout'
+              ? 'Время истекло, состояние попытки ещё не подтверждено сервером.'
+              : 'Состояние последнего ответа не удалось подтвердить автоматически.'
+          }}
+        </p>
+        <AppButton class="mt-3" variant="secondary" :loading="synchronizing" @click="manualSync"
           >Проверить состояние попытки</AppButton
         >
       </div>

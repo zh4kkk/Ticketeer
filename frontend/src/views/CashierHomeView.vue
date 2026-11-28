@@ -17,6 +17,7 @@ const search = ref('')
 const loading = ref(false)
 const error = ref('')
 const attempts = ref<AttemptHistoryItem[]>([])
+const attemptsTotal = ref(0)
 const attemptsLoading = ref(false)
 const attemptsError = ref('')
 let controller: AbortController | null = null
@@ -56,6 +57,7 @@ async function loadAttempts(): Promise<void> {
     const response = await getInProgressAttempts(currentController.signal)
     if (id !== attemptsRequestId) return
     attempts.value = response.items
+    attemptsTotal.value = response.totalCount
   } catch (e) {
     if (e instanceof ApiAbortError || id !== attemptsRequestId) return
     attemptsError.value =
@@ -70,7 +72,9 @@ function attemptTitle(attempt: AttemptHistoryItem): string {
     : attempt.examTitle || 'Экзамен'
 }
 function attemptDescription(attempt: AttemptHistoryItem): string {
-  return `${attempt.source === AttemptSourceValue.Prepared ? 'Подготовленный' : 'Случайный'} вариант · ${attempt.questionCount} вопросов`
+  return `${attempt.source === AttemptSourceValue.Prepared ? 'Подготовленный' : 'Случайный'} вариант · ${
+    attempt.correctAnswers + attempt.wrongAnswers
+  }/${attempt.questionCount} отвечено`
 }
 onMounted(loadAttempts)
 onBeforeUnmount(() => {
@@ -129,6 +133,9 @@ onBeforeUnmount(() => {
         <div>
           <h2 class="text-xl font-bold text-ink">Незавершённые попытки</h2>
           <p class="mt-1 text-sm text-muted">Продолжение не создаёт новую попытку.</p>
+          <p v-if="attemptsTotal > attempts.length" class="mt-1 text-sm text-muted">
+            Показано {{ attempts.length }} из {{ attemptsTotal }} незавершённых попыток.
+          </p>
         </div>
       </div>
       <LoadingState v-if="attemptsLoading" />

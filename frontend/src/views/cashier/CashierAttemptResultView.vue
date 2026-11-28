@@ -9,6 +9,7 @@ import LoadingState from '@/components/LoadingState.vue'
 import type { AttemptResponse } from '@/types/attempts'
 import { AttemptKindValue, AttemptSourceValue, AttemptStatusValue } from '@/types/attempts'
 import { parsePositiveInt } from '@/utils/routeQuery'
+import { getSessionGeneration } from '@/api/session'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,6 +18,7 @@ const loading = ref(false)
 const error = ref('')
 let controller: AbortController | null = null
 let requestId = 0
+let destroyed = false
 
 const id = computed(() => parsePositiveInt(route.params.id))
 const answeredCount = computed(
@@ -46,6 +48,7 @@ const statusText = computed(() => {
 async function load(): Promise<void> {
   controller?.abort()
   const currentRequest = ++requestId
+  const operationSession = getSessionGeneration()
   attempt.value = null
   error.value = ''
   if (!id.value) {
@@ -57,14 +60,26 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     const response = await getAttempt(id.value, controller.signal)
-    if (currentRequest !== requestId) return
+    if (
+      destroyed ||
+      currentRequest !== requestId ||
+      operationSession !== getSessionGeneration() ||
+      id.value !== parsePositiveInt(route.params.id)
+    )
+      return
     if (response.status === AttemptStatusValue.InProgress) {
       await router.replace({ name: 'cashier-attempt', params: { id: response.id } })
       return
     }
     attempt.value = response
   } catch (e) {
-    if (e instanceof ApiAbortError || currentRequest !== requestId) return
+    if (
+      e instanceof ApiAbortError ||
+      destroyed ||
+      currentRequest !== requestId ||
+      operationSession !== getSessionGeneration()
+    )
+      return
     error.value =
       e instanceof ApiError && e.status === 404
         ? 'Попытка не найдена.'
@@ -72,13 +87,15 @@ async function load(): Promise<void> {
           ? e.message
           : 'Не удалось загрузить результат.'
   } finally {
-    if (currentRequest === requestId) loading.value = false
+    if (currentRequest === requestId && operationSession === getSessionGeneration() && !destroyed)
+      loading.value = false
   }
 }
 
 watch(id, () => void load())
 onMounted(() => void load())
 onBeforeUnmount(() => {
+  destroyed = true
   requestId += 1
   controller?.abort()
 })
