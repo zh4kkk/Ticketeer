@@ -15,9 +15,13 @@ function logout(): void {
 
 <template>
   <header class="border-b border-line bg-surface">
-    <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+    <div
+      class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8"
+    >
       <div>
-        <RouterLink class="text-lg font-bold text-ink" :to="auth.isAdmin ? '/admin' : '/cashier'">Ticketeer</RouterLink>
+        <RouterLink class="text-lg font-bold text-ink" :to="auth.isAdmin ? '/admin' : '/cashier'"
+          >Ticketeer</RouterLink
+        >
         <p class="hidden text-xs text-muted sm:block">{{ title }}</p>
       </div>
       <div class="flex items-center gap-3">

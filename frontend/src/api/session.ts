@@ -27,7 +27,12 @@ export class SessionStorageError extends Error {
 function isValidSession(value: unknown): value is StoredSession {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Record<string, unknown>
-  return typeof candidate.token === 'string' && candidate.token.trim().length > 0 && typeof candidate.expiresAt === 'string' && Number.isFinite(Date.parse(candidate.expiresAt))
+  return (
+    typeof candidate.token === 'string' &&
+    candidate.token.trim().length > 0 &&
+    typeof candidate.expiresAt === 'string' &&
+    Number.isFinite(Date.parse(candidate.expiresAt))
+  )
 }
 
 export function readSession(): StoredSession | null {
@@ -48,15 +53,28 @@ export function readSession(): StoredSession | null {
 }
 
 export function writeSession(session: StoredSession): void {
-  if (!isValidSession(session)) throw new SessionStorageError('Сервер вернул некорректные данные сессии.')
+  if (!isValidSession(session))
+    throw new SessionStorageError('Сервер вернул некорректные данные сессии.')
   try {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
     sessionStorage.removeItem(LEGACY_TOKEN_KEY)
     sessionStorage.removeItem(LEGACY_EXPIRES_AT_KEY)
   } catch {
-    try { sessionStorage.removeItem(SESSION_KEY) } catch { /* Storage may be unavailable. */ }
-    try { sessionStorage.removeItem(LEGACY_TOKEN_KEY) } catch { /* Storage may be unavailable. */ }
-    try { sessionStorage.removeItem(LEGACY_EXPIRES_AT_KEY) } catch { /* Storage may be unavailable. */ }
+    try {
+      sessionStorage.removeItem(SESSION_KEY)
+    } catch {
+      /* Storage may be unavailable. */
+    }
+    try {
+      sessionStorage.removeItem(LEGACY_TOKEN_KEY)
+    } catch {
+      /* Storage may be unavailable. */
+    }
+    try {
+      sessionStorage.removeItem(LEGACY_EXPIRES_AT_KEY)
+    } catch {
+      /* Storage may be unavailable. */
+    }
     throw new SessionStorageError()
   }
 }

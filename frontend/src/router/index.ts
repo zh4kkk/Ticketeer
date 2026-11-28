@@ -28,7 +28,9 @@ const router = createRouter({
     { path: '/', name: 'root', component: RootView },
     { path: '/login', name: 'login', component: LoginView },
     {
-      path: '/cashier', component: CashierLayout, meta: { requiresAuth: true, roles: ['Cashier'] } satisfies RouteMeta,
+      path: '/cashier',
+      component: CashierLayout,
+      meta: { requiresAuth: true, roles: ['Cashier'] } satisfies RouteMeta,
       children: [
         { path: '', name: 'cashier-home', component: CashierHomeView },
         { path: 'topics', name: 'cashier-topics', component: CashierTopicsView },
@@ -37,11 +39,17 @@ const router = createRouter({
         { path: 'exams', name: 'cashier-exams', component: CashierExamsView },
         { path: 'exams/:id', name: 'cashier-exam-detail', component: CashierExamDetailView },
         { path: 'questions', name: 'cashier-questions', component: CashierQuestionsView },
-        { path: 'questions/:id', name: 'cashier-question-detail', component: CashierQuestionDetailView },
+        {
+          path: 'questions/:id',
+          name: 'cashier-question-detail',
+          component: CashierQuestionDetailView,
+        },
       ],
     },
     {
-      path: '/admin', component: AdminLayout, meta: { requiresAuth: true, roles: ['Admin'] } satisfies RouteMeta,
+      path: '/admin',
+      component: AdminLayout,
+      meta: { requiresAuth: true, roles: ['Admin'] } satisfies RouteMeta,
       children: [{ path: '', name: 'admin-home', component: AdminHomeView }],
     },
     { path: '/403', name: 'forbidden', component: StatusView, props: { code: 403 } },
@@ -53,12 +61,19 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   await auth.initializeSession()
   if (to.name === 'root') {
-    return auth.isAdmin ? { name: 'admin-home' } : auth.isCashier ? { name: 'cashier-home' } : { name: 'login' }
+    return auth.isAdmin
+      ? { name: 'admin-home' }
+      : auth.isCashier
+        ? { name: 'cashier-home' }
+        : { name: 'login' }
   }
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return {
       name: 'login',
-      query: { redirect: to.fullPath, ...(auth.sessionEndReason ? { reason: auth.sessionEndReason } : {}) },
+      query: {
+        redirect: to.fullPath,
+        ...(auth.sessionEndReason ? { reason: auth.sessionEndReason } : {}),
+      },
     }
   }
   if (to.name === 'login' && auth.isAuthenticated) {

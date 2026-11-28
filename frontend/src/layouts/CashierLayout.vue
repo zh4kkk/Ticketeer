@@ -1,5 +1,13 @@
 <script setup lang="ts">
 import AppHeader from '@/components/AppHeader.vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+const activeSection = (section: 'home' | 'topics' | 'tickets' | 'exams' | 'questions'): boolean => {
+  const name = String(route.name ?? '')
+  if (section === 'home') return name === 'cashier-home'
+  return name === `cashier-${section}` || name === `cashier-${section.slice(0, -1)}-detail`
+}
 </script>
 
 <template>
@@ -7,11 +15,36 @@ import AppHeader from '@/components/AppHeader.vue'
     <AppHeader title="Рабочее место кассира" />
     <div class="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:px-8">
       <nav aria-label="Навигация кассира" class="flex gap-2 overflow-x-auto lg:w-56 lg:flex-col">
-        <RouterLink class="nav-link" exact-active-class="nav-link-active" to="/cashier">Главная</RouterLink>
-        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/topics">Темы</RouterLink>
-        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/tickets">Тренировочные билеты</RouterLink>
-        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/exams">Экзамены</RouterLink>
-        <RouterLink class="nav-link" active-class="nav-link-active" to="/cashier/questions">Вопросы</RouterLink>
+        <RouterLink
+          class="nav-link"
+          :class="{ 'nav-link-active': activeSection('home') }"
+          to="/cashier"
+          >Главная</RouterLink
+        >
+        <RouterLink
+          class="nav-link"
+          :class="{ 'nav-link-active': activeSection('topics') }"
+          to="/cashier/topics"
+          >Темы</RouterLink
+        >
+        <RouterLink
+          class="nav-link"
+          :class="{ 'nav-link-active': activeSection('tickets') }"
+          to="/cashier/tickets"
+          >Тренировочные билеты</RouterLink
+        >
+        <RouterLink
+          class="nav-link"
+          :class="{ 'nav-link-active': activeSection('exams') }"
+          to="/cashier/exams"
+          >Экзамены</RouterLink
+        >
+        <RouterLink
+          class="nav-link"
+          :class="{ 'nav-link-active': activeSection('questions') }"
+          to="/cashier/questions"
+          >Вопросы</RouterLink
+        >
       </nav>
       <main class="min-w-0 flex-1"><RouterView /></main>
     </div>

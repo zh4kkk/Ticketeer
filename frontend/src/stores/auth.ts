@@ -2,12 +2,23 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { getCurrentUser, login as loginRequest } from '@/api/auth'
 import { ApiError } from '@/api/http'
-import { clearSession, isSessionExpired, readSession, SessionStorageError, setSessionGeneration, writeSession } from '@/api/session'
+import {
+  clearSession,
+  isSessionExpired,
+  readSession,
+  SessionStorageError,
+  setSessionGeneration,
+  writeSession,
+} from '@/api/session'
 import type { CurrentUserResponse, LoginRequest } from '@/types/api'
 
 export class AuthProfileError extends Error {
   constructor(details?: string) {
-    super(details ? `Не удалось подтвердить профиль после входа: ${details}` : 'Не удалось подтвердить профиль после входа.')
+    super(
+      details
+        ? `Не удалось подтвердить профиль после входа: ${details}`
+        : 'Не удалось подтвердить профиль после входа.',
+    )
     this.name = 'AuthProfileError'
   }
 }
@@ -28,8 +39,8 @@ export const useAuthStore = defineStore('auth', () => {
   let loginPromise: Promise<CurrentUserResponse> | null = null
   setSessionGeneration(generation)
 
-  const isAuthenticated = computed(
-    () => Boolean(token.value && expiresAt.value && user.value && !isSessionExpired(expiresAt.value)),
+  const isAuthenticated = computed(() =>
+    Boolean(token.value && expiresAt.value && user.value && !isSessionExpired(expiresAt.value)),
   )
   const isAdmin = computed(() => isAuthenticated.value && user.value?.role === 'Admin')
   const isCashier = computed(() => isAuthenticated.value && user.value?.role === 'Cashier')
@@ -66,11 +77,14 @@ export const useAuthStore = defineStore('auth', () => {
       if (sessionGeneration === generation) endSession('expired')
       return
     }
-    expiryTimer = setTimeout(() => {
-      if (sessionGeneration !== generation) return
-      if (isSessionExpired(value)) endSession('expired')
-      else scheduleExpiry(sessionGeneration, value)
-    }, Math.min(remaining, MAX_TIMEOUT))
+    expiryTimer = setTimeout(
+      () => {
+        if (sessionGeneration !== generation) return
+        if (isSessionExpired(value)) endSession('expired')
+        else scheduleExpiry(sessionGeneration, value)
+      },
+      Math.min(remaining, MAX_TIMEOUT),
+    )
   }
 
   function supportedUser(value: CurrentUserResponse): boolean {
@@ -110,17 +124,22 @@ export const useAuthStore = defineStore('auth', () => {
         if (operationGeneration !== generation) return
         if (error instanceof ApiError && error.status === 401) {
           endSession('unauthorized')
-        } else if (error instanceof ApiError && (error.kind === 'network' || error.status === 403 || error.status >= 500)) {
+        } else if (
+          error instanceof ApiError &&
+          (error.kind === 'network' || error.status === 403 || error.status >= 500)
+        ) {
           user.value = null
-          initializationError.value = error.status === 403
-            ? 'Сервер временно запретил проверку сессии. Повторите попытку позже.'
-            : 'Не удалось проверить сессию. Проверьте подключение и повторите попытку.'
+          initializationError.value =
+            error.status === 403
+              ? 'Сервер временно запретил проверку сессии. Повторите попытку позже.'
+              : 'Не удалось проверить сессию. Проверьте подключение и повторите попытку.'
         } else if (error instanceof ApiError && error.kind === 'parse') {
           clearState()
           initializationError.value = error.message
         } else {
           clearState()
-          initializationError.value = error instanceof Error ? error.message : 'Не удалось восстановить сессию.'
+          initializationError.value =
+            error instanceof Error ? error.message : 'Не удалось восстановить сессию.'
         }
       } finally {
         isInitialized.value = true
@@ -159,7 +178,8 @@ export const useAuthStore = defineStore('auth', () => {
     sessionEndReason.value = null
     const response = await loginRequest(credentials)
     if (sessionGeneration !== generation) throw new ApiError('Сессия была изменена.', 0)
-    if (isSessionExpired(response.expiresAt)) throw new ApiError('Сервер вернул уже истёкший токен.', 0)
+    if (isSessionExpired(response.expiresAt))
+      throw new ApiError('Сервер вернул уже истёкший токен.', 0)
     try {
       writeSession({ token: response.token, expiresAt: response.expiresAt })
       token.value = response.token
@@ -175,7 +195,8 @@ export const useAuthStore = defineStore('auth', () => {
         endSession('expired')
         throw new AuthProfileError('Срок действия сессии истёк во время входа.')
       }
-      if (!supportedUser(profile)) throw new AuthProfileError('Сервер вернул неподдерживаемую роль.')
+      if (!supportedUser(profile))
+        throw new AuthProfileError('Сервер вернул неподдерживаемую роль.')
       user.value = profile
       isInitialized.value = true
       scheduleExpiry(sessionGeneration, response.expiresAt)

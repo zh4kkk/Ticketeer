@@ -52,7 +52,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeApiUrl(input: string): string {
-  if (!input || input.includes('\\') || input.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(input)) {
+  if (
+    !input ||
+    input.includes('\\') ||
+    input.startsWith('//') ||
+    /^[a-z][a-z\d+.-]*:/i.test(input)
+  ) {
     throw new ApiError('HTTP-клиент принимает только относительные адреса API.', 0)
   }
   const origin = globalThis.location?.origin ?? 'http://localhost'
@@ -90,7 +95,9 @@ function errorFromResponse(status: number, body: ParsedBody): ApiError {
     payload.error ??
     payload.detail ??
     payload.title ??
-    (status >= 500 ? 'Сервер временно недоступен.' : `Не удалось выполнить запрос (HTTP ${status}).`)
+    (status >= 500
+      ? 'Сервер временно недоступен.'
+      : `Не удалось выполнить запрос (HTTP ${status}).`)
   return new ApiError(message, status, validationErrors)
 }
 
@@ -98,8 +105,14 @@ function isAbortError(error: unknown): boolean {
   return isObject(error) && error.name === 'AbortError'
 }
 
-export async function request(url: string, options: RequestOptions & { responseType: 'empty' }): Promise<void>
-export async function request<T = unknown>(url: string, options?: Omit<RequestOptions, 'responseType'> & { responseType?: 'json' }): Promise<T>
+export async function request(
+  url: string,
+  options: RequestOptions & { responseType: 'empty' },
+): Promise<void>
+export async function request<T = unknown>(
+  url: string,
+  options?: Omit<RequestOptions, 'responseType'> & { responseType?: 'json' },
+): Promise<T>
 export async function request<T>(url: string, options: RequestOptions = {}): Promise<T | void> {
   const normalizedUrl = normalizeApiUrl(url)
   const { json, headers: providedHeaders, responseType = 'json', auth = true, ...init } = options
@@ -112,7 +125,11 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
   const session = auth ? readSession() : null
   const requestGeneration = getSessionGeneration()
   if (session?.token && isSessionExpired(session.expiresAt)) {
-    unauthorizedHandler?.({ token: session.token, generation: requestGeneration, url: normalizedUrl })
+    unauthorizedHandler?.({
+      token: session.token,
+      generation: requestGeneration,
+      url: normalizedUrl,
+    })
     throw new ApiError('Срок действия сессии истёк.', 401)
   }
   headers.delete('Authorization')
@@ -123,7 +140,10 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
     response = await fetch(normalizedUrl, { ...init, headers })
   } catch (error) {
     if (isAbortError(error)) throw new ApiAbortError()
-    throw new ApiError('Не удалось связаться с сервером. Проверьте подключение и повторите попытку.', 0)
+    throw new ApiError(
+      'Не удалось связаться с сервером. Проверьте подключение и повторите попытку.',
+      0,
+    )
   }
 
   let body: ParsedBody
@@ -134,18 +154,26 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
     throw new ApiError('Не удалось прочитать ответ сервера.', response.status, {}, 'parse')
   }
   if (!response.ok) {
-    if (response.status === 401 && session?.token) unauthorizedHandler?.({ token: session.token, generation: requestGeneration, url: normalizedUrl })
+    if (response.status === 401 && session?.token)
+      unauthorizedHandler?.({
+        token: session.token,
+        generation: requestGeneration,
+        url: normalizedUrl,
+      })
     throw errorFromResponse(response.status, body)
   }
   if (responseType === 'empty') return
   if (response.status === 204 || body.empty) {
     throw new ApiError('Сервер вернул пустой ответ вместо JSON.', response.status, {}, 'parse')
   }
-  if (body.value === null) throw new ApiError('Сервер вернул некорректный JSON.', response.status, {}, 'parse')
+  if (body.value === null)
+    throw new ApiError('Сервер вернул некорректный JSON.', response.status, {}, 'parse')
   return body.value as T
 }
 
-type JsonOptions = Omit<RequestOptions, 'method' | 'json' | 'responseType'> & { responseType?: 'json' }
+type JsonOptions = Omit<RequestOptions, 'method' | 'json' | 'responseType'> & {
+  responseType?: 'json'
+}
 type EmptyOptions = Omit<RequestOptions, 'method' | 'json'> & { responseType: 'empty' }
 
 function get<T = unknown>(url: string, options: JsonOptions = {}): Promise<T> {
@@ -153,17 +181,30 @@ function get<T = unknown>(url: string, options: JsonOptions = {}): Promise<T> {
 }
 function post<T = unknown>(url: string, json?: unknown, options?: JsonOptions): Promise<T>
 function post(url: string, json: unknown, options: EmptyOptions): Promise<void>
-function post<T>(url: string, json?: unknown, options: JsonOptions | EmptyOptions = {}): Promise<T | void> {
+function post<T>(
+  url: string,
+  json?: unknown,
+  options: JsonOptions | EmptyOptions = {},
+): Promise<T | void> {
   if (options.responseType === 'empty') return request(url, { ...options, method: 'POST', json })
   return request<T>(url, { ...options, method: 'POST', json })
 }
 function put<T = unknown>(url: string, json?: unknown, options?: JsonOptions): Promise<T>
 function put(url: string, json: unknown, options: EmptyOptions): Promise<void>
-function put<T>(url: string, json?: unknown, options: JsonOptions | EmptyOptions = {}): Promise<T | void> {
+function put<T>(
+  url: string,
+  json?: unknown,
+  options: JsonOptions | EmptyOptions = {},
+): Promise<T | void> {
   if (options.responseType === 'empty') return request(url, { ...options, method: 'PUT', json })
   return request<T>(url, { ...options, method: 'PUT', json })
 }
-function del(url: string, options: Omit<RequestOptions, 'method' | 'json' | 'responseType'> & { responseType?: 'empty' } = {}): Promise<void> {
+function del(
+  url: string,
+  options: Omit<RequestOptions, 'method' | 'json' | 'responseType'> & {
+    responseType?: 'empty'
+  } = {},
+): Promise<void> {
   return request(url, { ...options, method: 'DELETE', responseType: 'empty' })
 }
 

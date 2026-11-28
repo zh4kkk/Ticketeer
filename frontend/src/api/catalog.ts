@@ -13,7 +13,8 @@ import type {
 } from '@/types/catalog'
 
 function validId(id: number): number {
-  if (!Number.isInteger(id) || id <= 0) throw new ApiError('Некорректный идентификатор материала.', 400)
+  if (!Number.isSafeInteger(id) || id <= 0 || id > 2_147_483_647)
+    throw new ApiError('Некорректный идентификатор материала.', 400)
   return id
 }
 
@@ -31,37 +32,68 @@ function queryString(values: Record<string, string | number | boolean | undefine
   return query ? `?${query}` : ''
 }
 
-export function getCatalogTopics(options: Pick<CatalogListOptions, 'search' | 'signal'> = {}): Promise<CatalogTopicResponse[]> {
-  return api.get<CatalogTopicResponse[]>(`/api/catalog/topics${queryString({ search: searchValue(options.search) })}`, { signal: options.signal })
+export function getCatalogTopics(
+  options: Pick<CatalogListOptions, 'search' | 'signal'> = {},
+): Promise<CatalogTopicResponse[]> {
+  return api.get<CatalogTopicResponse[]>(
+    `/api/catalog/topics${queryString({ search: searchValue(options.search) })}`,
+    { signal: options.signal },
+  )
 }
 
-export function getCatalogTickets(options: TicketListOptions = {}): Promise<PagedResponse<CatalogTicketListResponse>> {
-  return api.get<PagedResponse<CatalogTicketListResponse>>(`/api/catalog/tickets${queryString({
-    search: searchValue(options.search), topicId: options.topicId, isCompleted: options.isCompleted,
-    page: options.page, pageSize: options.pageSize,
-  })}`, { signal: options.signal })
+export function getCatalogTickets(
+  options: TicketListOptions = {},
+): Promise<PagedResponse<CatalogTicketListResponse>> {
+  return api.get<PagedResponse<CatalogTicketListResponse>>(
+    `/api/catalog/tickets${queryString({
+      search: searchValue(options.search),
+      topicId: options.topicId,
+      isCompleted: options.isCompleted,
+      page: options.page,
+      pageSize: options.pageSize,
+    })}`,
+    { signal: options.signal },
+  )
 }
 
 export function getCatalogTicket(id: number, signal?: AbortSignal): Promise<CatalogTicketResponse> {
   return api.get<CatalogTicketResponse>(`/api/catalog/tickets/${validId(id)}`, { signal })
 }
 
-export function getCatalogExams(options: CatalogListOptions = {}): Promise<PagedResponse<CatalogExamResponse>> {
-  return api.get<PagedResponse<CatalogExamResponse>>(`/api/catalog/exams${queryString({
-    search: searchValue(options.search), page: options.page, pageSize: options.pageSize,
-  })}`, { signal: options.signal })
+export function getCatalogExams(
+  options: CatalogListOptions = {},
+): Promise<PagedResponse<CatalogExamResponse>> {
+  return api.get<PagedResponse<CatalogExamResponse>>(
+    `/api/catalog/exams${queryString({
+      search: searchValue(options.search),
+      page: options.page,
+      pageSize: options.pageSize,
+    })}`,
+    { signal: options.signal },
+  )
 }
 
 export function getCatalogExam(id: number, signal?: AbortSignal): Promise<CatalogExamResponse> {
   return api.get<CatalogExamResponse>(`/api/catalog/exams/${validId(id)}`, { signal })
 }
 
-export function getCatalogQuestions(options: QuestionListOptions = {}): Promise<PagedResponse<CatalogQuestionListResponse>> {
-  return api.get<PagedResponse<CatalogQuestionListResponse>>(`/api/catalog/questions${queryString({
-    search: searchValue(options.search), topicId: options.topicId, page: options.page, pageSize: options.pageSize,
-  })}`, { signal: options.signal })
+export function getCatalogQuestions(
+  options: QuestionListOptions = {},
+): Promise<PagedResponse<CatalogQuestionListResponse>> {
+  return api.get<PagedResponse<CatalogQuestionListResponse>>(
+    `/api/catalog/questions${queryString({
+      search: searchValue(options.search),
+      topicId: options.topicId,
+      page: options.page,
+      pageSize: options.pageSize,
+    })}`,
+    { signal: options.signal },
+  )
 }
 
-export function getCatalogQuestion(id: number, signal?: AbortSignal): Promise<CatalogQuestionResponse> {
+export function getCatalogQuestion(
+  id: number,
+  signal?: AbortSignal,
+): Promise<CatalogQuestionResponse> {
   return api.get<CatalogQuestionResponse>(`/api/catalog/questions/${validId(id)}`, { signal })
 }

@@ -3,12 +3,216 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCatalogTickets, getCatalogTopics } from '@/api/catalog'
 import { ApiAbortError, ApiError } from '@/api/http'
-import EmptyState from '@/components/EmptyState.vue'; import ErrorState from '@/components/ErrorState.vue'; import LoadingState from '@/components/LoadingState.vue'; import Pagination from '@/components/CatalogPagination.vue'; import StatusLabel from '@/components/StatusLabel.vue'
-import type { CatalogTicketListResponse, CatalogTopicResponse } from '@/types/catalog'; import type { PagedResponse } from '@/types/api'
-const route=useRoute(); const router=useRouter(); const pageSize=20; const search=ref(''); const topicId=ref(''); const status=ref(''); const result=ref<PagedResponse<CatalogTicketListResponse>|null>(null); const topics=ref<CatalogTopicResponse[]>([]); const loading=ref(false); const error=ref(''); let controller:AbortController|null=null; let topicController:AbortController|null=null; let requestId=0
-function queryString(key:string):string { return typeof route.query[key]==='string' ? route.query[key] as string : '' }; function page():number { const n=Number(queryString('page')); return Number.isInteger(n)&&n>0?n:1 }; function parseTopic():number|undefined { const n=Number(queryString('topicId')); return Number.isInteger(n)&&n>0?n:undefined }; function parseStatus():boolean|undefined { const v=queryString('isCompleted'); return v==='true'?true:v==='false'?false:undefined }; function message(e:unknown):string{return e instanceof ApiError?e.message:'Не удалось загрузить билеты.'}
-function sync(){search.value=queryString('search'); topicId.value=parseTopic()?.toString()||''; status.value=queryString('isCompleted')}; async function load(){controller?.abort(); controller=new AbortController(); const id=++requestId; loading.value=true; error.value=''; try{const p=page(); result.value=await getCatalogTickets({search:queryString('search'),topicId:parseTopic(),isCompleted:parseStatus(),page:p,pageSize,signal:controller.signal}); const max=Math.max(1,Math.ceil(result.value.totalCount/pageSize)); if(p>max) void router.replace({query:{...route.query,page:String(max)}})}catch(e){if(e instanceof ApiAbortError||id!==requestId)return;error.value=message(e);result.value=null}finally{if(id===requestId)loading.value=false}}
-function apply(){const q:Record<string,string>={};const s=search.value.trim().slice(0,200);if(s)q.search=s; if(topicId.value)q.topicId=topicId.value;if(status.value)q.isCompleted=status.value;void router.replace({name:'cashier-tickets',query:q})}; function changePage(p:number){if(p<1||!result.value)return;const max=Math.ceil(result.value.totalCount/pageSize);if(p>max)return;void router.replace({query:{...route.query,page:String(p)}})}; function reset(){search.value='';topicId.value='';status.value='';apply()}
-watch(()=>route.query,()=>{sync();void load()},{immediate:true}); onMounted(async()=>{topicController=new AbortController();try{topics.value=await getCatalogTopics({signal:topicController.signal})}catch(e){if(!(e instanceof ApiAbortError))topics.value=[]}});onBeforeUnmount(()=>{controller?.abort();topicController?.abort()})
+import EmptyState from '@/components/EmptyState.vue'
+import ErrorState from '@/components/ErrorState.vue'
+import LoadingState from '@/components/LoadingState.vue'
+import Pagination from '@/components/CatalogPagination.vue'
+import StatusLabel from '@/components/StatusLabel.vue'
+import type { CatalogTicketListResponse, CatalogTopicResponse } from '@/types/catalog'
+import type { PagedResponse } from '@/types/api'
+import {
+  parseBoolean,
+  parsePage,
+  parsePositiveInt,
+  parseSearch,
+  queryString,
+} from '@/utils/routeQuery'
+const route = useRoute()
+const router = useRouter()
+const pageSize = 20
+const search = ref('')
+const topicId = ref('')
+const status = ref('')
+const result = ref<PagedResponse<CatalogTicketListResponse> | null>(null)
+const topics = ref<CatalogTopicResponse[]>([])
+const loading = ref(false)
+const error = ref('')
+let controller: AbortController | null = null
+let topicController: AbortController | null = null
+let topicRequestId = 0
+let requestId = 0
+const topicLoadError = ref('')
+const topicsLoading = ref(false)
+function page(): number {
+  return parsePage(route.query.page, pageSize)
+}
+function parseTopic(): number | undefined {
+  return parsePositiveInt(route.query.topicId)
+}
+function parseStatus(): boolean | undefined {
+  return parseBoolean(route.query.isCompleted)
+}
+function message(e: unknown): string {
+  return e instanceof ApiError ? e.message : 'Не удалось загрузить билеты.'
+}
+function sync() {
+  search.value = queryString('search')
+  topicId.value = parseTopic()?.toString() || ''
+  status.value = queryString('isCompleted')
+}
+async function load() {
+  controller?.abort()
+  controller = new AbortController()
+  const id = ++requestId
+  loading.value = true
+  error.value = ''
+  try {
+    const p = page()
+    const response = await getCatalogTickets({
+      search: parseSearch(route.query.search),
+      topicId: parseTopic(),
+      isCompleted: parseStatus(),
+      page: p,
+      pageSize,
+      signal: controller.signal,
+    })
+    if (id !== requestId) return
+    result.value = response
+    const max = Math.max(1, Math.ceil(response.totalCount / pageSize))
+    if (p > max) void router.replace({ query: { ...route.query, page: String(max) } })
+  } catch (e) {
+    if (e instanceof ApiAbortError || id !== requestId) return
+    error.value = message(e)
+    result.value = null
+  } finally {
+    if (id === requestId) loading.value = false
+  }
+}
+function apply() {
+  const q: Record<string, string> = {}
+  const s = search.value.trim().slice(0, 200)
+  if (s) q.search = s
+  if (topicId.value) q.topicId = topicId.value
+  if (status.value) q.isCompleted = status.value
+  void router.push({ name: 'cashier-tickets', query: q })
+}
+function changePage(p: number) {
+  if (p < 1 || !result.value) return
+  const max = Math.ceil(result.value.totalCount / pageSize)
+  if (p > max) return
+  void router.replace({ query: { ...route.query, page: String(p) } })
+}
+function reset() {
+  search.value = ''
+  topicId.value = ''
+  status.value = ''
+  apply()
+}
+watch(
+  () => route.query,
+  () => {
+    sync()
+    void load()
+  },
+  { immediate: true },
+)
+async function loadTopics(): Promise<void> {
+  topicController?.abort()
+  topicController = new AbortController()
+  const currentTopicRequest = ++topicRequestId
+  topicsLoading.value = true
+  topicLoadError.value = ''
+  try {
+    const response = await getCatalogTopics({ signal: topicController.signal })
+    if (currentTopicRequest !== topicRequestId) return
+    topics.value = response
+  } catch (e) {
+    if (!(e instanceof ApiAbortError) && currentTopicRequest === topicRequestId)
+      topicLoadError.value = 'Не удалось загрузить темы. Повторите попытку.'
+  } finally {
+    if (currentTopicRequest === topicRequestId) topicsLoading.value = false
+  }
+}
+onMounted(() => {
+  void loadTopics()
+})
+onBeforeUnmount(() => {
+  requestId += 1
+  controller?.abort()
+  topicController?.abort()
+  topicRequestId += 1
+})
 </script>
-<template><section class="space-y-6"><div><p class="text-sm font-semibold uppercase tracking-wider text-brand">Практика</p><h1 class="mt-2 text-3xl font-bold text-ink">Тренировочные билеты</h1></div><form class="grid gap-3 rounded-app border border-line bg-surface p-4 md:grid-cols-[2fr_1fr_1fr_auto]" @submit.prevent="apply"><label class="sr-only" for="ticket-search">Поиск билетов</label><input id="ticket-search" v-model="search" maxlength="200" class="app-input" placeholder="Поиск по названию и описанию" /><select v-model="topicId" class="app-input" aria-label="Тема"><option value="">Все темы</option><option v-for="topic in topics" :key="topic.id" :value="String(topic.id)">{{ topic.name }}</option></select><select v-model="status" class="app-input" aria-label="Статус"><option value="">Все</option><option value="true">Пройденные</option><option value="false">Непройденные</option></select><button class="rounded-app bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-hover" type="submit">Применить</button><button v-if="search||topicId||status" class="md:col-span-4 justify-self-start text-sm font-semibold text-secondary hover:underline" type="button" @click="reset">Сбросить фильтры</button></form><LoadingState v-if="loading"/><ErrorState v-else-if="error" :message="error" :retry="load"/><EmptyState v-else-if="!result||result.items.length===0" message="Билеты по заданным условиям не найдены."/><div v-else class="space-y-3"><RouterLink v-for="ticket in result.items" :key="ticket.id" class="block rounded-app border border-line bg-surface p-5 shadow-sm transition hover:border-brand" :to="{name:'cashier-ticket-detail',params:{id:ticket.id},query:route.query}"><div class="flex flex-wrap items-start justify-between gap-3"><h2 class="text-lg font-semibold text-ink">{{ ticket.title }}</h2><StatusLabel :completed="ticket.isCompleted"/></div><p v-if="ticket.description" class="mt-2 text-sm text-muted">{{ ticket.description }}</p><p class="mt-3 text-sm text-muted">Вопросов: {{ ticket.questionCount }}</p></RouterLink><Pagination :page="result.page" :page-size="result.pageSize" :total-count="result.totalCount" @change="changePage"/></div></section></template>
+<template>
+  <section class="space-y-6">
+    <div>
+      <p class="text-sm font-semibold uppercase tracking-wider text-brand">Практика</p>
+      <h1 class="mt-2 text-3xl font-bold text-ink">Тренировочные билеты</h1>
+    </div>
+    <form
+      class="grid gap-3 rounded-app border border-line bg-surface p-4 md:grid-cols-[2fr_1fr_1fr_auto]"
+      @submit.prevent="apply"
+    >
+      <label class="sr-only" for="ticket-search">Поиск билетов</label
+      ><input
+        id="ticket-search"
+        v-model="search"
+        maxlength="200"
+        class="app-input"
+        placeholder="Поиск по названию и описанию"
+      /><select
+        v-model="topicId"
+        class="app-input"
+        aria-label="Тема"
+        :disabled="topicsLoading || !!topicLoadError"
+      >
+        <option value="">Все темы</option>
+        <option v-for="topic in topics" :key="topic.id" :value="String(topic.id)">
+          {{ topic.name }}
+        </option></select
+      ><select v-model="status" class="app-input" aria-label="Статус">
+        <option value="">Все</option>
+        <option value="true">Пройденные</option>
+        <option value="false">Непройденные</option></select
+      ><button
+        class="rounded-app bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-hover"
+        type="submit"
+      >
+        Применить</button
+      ><button
+        v-if="search || topicId || status"
+        class="md:col-span-4 justify-self-start text-sm font-semibold text-secondary hover:underline"
+        type="button"
+        @click="reset"
+      >
+        Сбросить фильтры
+      </button>
+    </form>
+    <div
+      v-if="topicLoadError"
+      class="rounded-app border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+    >
+      {{ topicLoadError }}
+      <button class="ml-2 font-semibold underline" type="button" @click="loadTopics">
+        Повторить
+      </button>
+    </div>
+    <LoadingState v-if="loading" /><ErrorState
+      v-else-if="error"
+      :message="error"
+      :retry="load"
+    /><EmptyState
+      v-else-if="!result || result.items.length === 0"
+      message="Билеты по заданным условиям не найдены."
+    />
+    <div v-else class="space-y-3">
+      <RouterLink
+        v-for="ticket in result.items"
+        :key="ticket.id"
+        class="block rounded-app border border-line bg-surface p-5 shadow-sm transition hover:border-brand"
+        :to="{ name: 'cashier-ticket-detail', params: { id: ticket.id }, query: route.query }"
+        ><div class="flex flex-wrap items-start justify-between gap-3">
+          <h2 class="text-lg font-semibold text-ink">{{ ticket.title }}</h2>
+          <StatusLabel :completed="ticket.isCompleted" />
+        </div>
+        <p v-if="ticket.description" class="mt-2 text-sm text-muted">{{ ticket.description }}</p>
+        <p class="mt-3 text-sm text-muted">Вопросов: {{ ticket.questionCount }}</p></RouterLink
+      ><Pagination
+        :page="result.page"
+        :page-size="result.pageSize"
+        :total-count="result.totalCount"
+        @change="changePage"
+      />
+    </div>
+  </section>
+</template>

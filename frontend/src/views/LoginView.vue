@@ -39,7 +39,11 @@ function safeRedirect(): string {
     return home
   }
   const roles = resolved.meta.roles
-  const isAllowed = resolved.meta.requiresAuth === true && resolved.name !== 'login' && resolved.name !== 'not-found' && Boolean(auth.user && roles?.includes(auth.user.role))
+  const isAllowed =
+    resolved.meta.requiresAuth === true &&
+    resolved.name !== 'login' &&
+    resolved.name !== 'not-found' &&
+    Boolean(auth.user && roles?.includes(auth.user.role))
   return isAllowed ? resolved.fullPath : home
 }
 
@@ -78,25 +82,68 @@ async function submit(): Promise<void> {
       <div class="mb-8">
         <p class="mb-2 text-sm font-semibold uppercase tracking-widest text-brand">Ticketeer</p>
         <h1 class="text-2xl font-bold text-ink">Вход в приложение</h1>
-        <p class="mt-2 text-sm leading-6 text-muted">Обучение и проверка знаний железнодорожных билетных кассиров.</p>
+        <p class="mt-2 text-sm leading-6 text-muted">
+          Обучение и проверка знаний железнодорожных билетных кассиров.
+        </p>
       </div>
-      <AppAlert v-if="route.query.reason === 'expired'" message="Срок действия сессии истёк. Войдите снова." variant="info" class="mb-4" />
-      <AppAlert v-else-if="route.query.reason === 'unauthorized'" message="Сессия больше недействительна. Войдите снова." variant="info" class="mb-4" />
+      <AppAlert
+        v-if="route.query.reason === 'expired'"
+        message="Срок действия сессии истёк. Войдите снова."
+        variant="info"
+        class="mb-4"
+      />
+      <AppAlert
+        v-else-if="route.query.reason === 'unauthorized'"
+        message="Сессия больше недействительна. Войдите снова."
+        variant="info"
+        class="mb-4"
+      />
       <div v-if="auth.initializationError" class="mb-4 space-y-3">
         <AppAlert :message="auth.initializationError" variant="info" />
-        <AppButton variant="secondary" :loading="isRetryingSession" :disabled="isSubmitting || isRetryingSession" @click="retrySession">Повторить проверку сессии</AppButton>
+        <AppButton
+          variant="secondary"
+          :loading="isRetryingSession"
+          :disabled="isSubmitting || isRetryingSession"
+          @click="retrySession"
+          >Повторить проверку сессии</AppButton
+        >
       </div>
       <AppAlert v-if="errorMessage" :message="errorMessage" class="mb-4" />
       <form class="space-y-5" @submit.prevent="submit">
         <div>
           <label for="login" class="mb-1.5 block text-sm font-medium text-ink">Логин</label>
-          <input id="login" v-model="login" name="login" type="text" autocomplete="username" maxlength="100" required class="app-input" :disabled="isSubmitting || isRetryingSession" />
+          <input
+            id="login"
+            v-model="login"
+            name="login"
+            type="text"
+            autocomplete="username"
+            maxlength="100"
+            required
+            class="app-input"
+            :disabled="isSubmitting || isRetryingSession"
+          />
         </div>
         <div>
           <label for="password" class="mb-1.5 block text-sm font-medium text-ink">Пароль</label>
-          <input id="password" v-model="password" name="password" type="password" autocomplete="current-password" required class="app-input" :disabled="isSubmitting || isRetryingSession" />
+          <input
+            id="password"
+            v-model="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+            class="app-input"
+            :disabled="isSubmitting || isRetryingSession"
+          />
         </div>
-        <AppButton type="submit" :loading="isSubmitting" :disabled="!canSubmit || isRetryingSession" class="w-full">Войти</AppButton>
+        <AppButton
+          type="submit"
+          :loading="isSubmitting"
+          :disabled="!canSubmit || isRetryingSession"
+          class="w-full"
+          >Войти</AppButton
+        >
       </form>
     </section>
   </main>

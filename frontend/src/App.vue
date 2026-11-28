@@ -13,7 +13,10 @@ onMounted(async () => {
 
 <template>
   <div v-if="!ready" class="grid min-h-screen place-items-center bg-canvas" aria-live="polite">
-    <div class="text-center"><div class="app-spinner mx-auto" aria-hidden="true" /><p class="mt-3 text-sm text-muted">Проверяем сессию…</p></div>
+    <div class="text-center">
+      <div class="app-spinner mx-auto" aria-hidden="true" />
+      <p class="mt-3 text-sm text-muted">Проверяем сессию…</p>
+    </div>
   </div>
   <RouterView v-else />
 </template>
